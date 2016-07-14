@@ -1,8 +1,11 @@
 import glob, os
 import pandas as pd
 import numpy as np
-ChrFile = '/home/bnet/yaelsilb/delib/data/5314/SC5314_A22_Haploid_A.fa' #move to config file. upload to nas
-FeatureFName = '/home/bnet/yaelsilb/delib/data/5314/C_albicans_SC5314_version_A22-s05-m05-r12_chromosomal_feature.tab' #move to config file. upload to nas
+import pysam
+
+# TODO: move to config file.
+ChrFile = 'dependencies/SC5314_A22_Haploid_A.fa'
+FeatureFName = 'dependencies/C_albicans_SC5314_version_A22-s05-m05-r12_chromosomal_feature.tab'
 
 SamCols = ['ReadName','FlagSum', 'Chr','Pos','MapQuality','CIGAR','MateChr','MatePos','InsertSize','ReadSeq','ReadQualities',\
            'OptField1','OptField2','OptField3','OptField4','OptField5','OptField6','OptField7','OptField8','OptField9','OptField10']
@@ -11,11 +14,26 @@ SamColsTypes = {'ReadName':str,'FlagSum':int, 'Chr':str,'Pos':float,'MapQuality'
 ChrFeatCols = ['FeatureName', 'GeneName','Aliases','FeatureType','Chromosome','StartCoord','StopCoord','Strand','PrimaryCGDID','SecondaryCGDID',\
         'Description','DateCreated','SeqCoordVerDate','Blank1','Blank2','GeneNameReserDate','ReservedIsstandardName','SC_ortholog']
 
-		
+
 #this procedure traverse the sam file, check for high confidence alingment, unite unique positions, and if they should / could be aligned with adjucent positions
 def FindHitsPerSample(SamAlign,ChrFeatMap, Sep0N = 2,MapQ=10):
-    Chromosomes = SamAlign.Chr.unique()
-    SamAlign = SamAlign[(SamAlign.MapQuality>=MapQ)] #consider only reads with a decent map quality 
+    Chromosomes = SamAlign.references
+    hit_map = {}
+    for line in SamAlign:
+        assert line.tid == line.reference_id
+        if line.mapq < MapQ:
+            continue
+        # Since start < end always, in alignments which are reversed (along the Crick strand) the start of the fragment is actually at the 'end' point. 
+        if line.is_reverse:
+            pos = line.reference_end
+        else:
+            # For some reason, the statr is always off by one (observed in IGV).
+            pos = line.reference_start + 1
+        chrom = SamAlign.getrname(line.reference_id)
+        if chrom not in hit_map:
+            hit_map[chrom] = np.zeros(ChrLen[chrom]+1, dtype=np.int)
+        hit_map[chrom][pos] += 1
+        
     ChrHitList = {}
     TotalHits =0;TotalUniqueHits=0
     for Chr in Chromosomes:
@@ -23,7 +41,7 @@ def FindHitsPerSample(SamAlign,ChrFeatMap, Sep0N = 2,MapQ=10):
             print '{} not found in Chromosome feature file'.format(Chr)
             continue
             
-        PosCount,bins = np.histogram(SamAlign[SamAlign.Chr==Chr].Pos.values, bins = range(ChrLen[Chr]+1)) #returns number of hits in each position along the chromosome
+        PosCount = hit_map[Chr]
         HitsPos = np.where(PosCount>0)[0] #returns only the positions in the chromosome which have at least one read
         TotalHits += len(HitsPos)
         #now we want to count how many hits are "unique" after merging close hits with at most N seperating non-reads between them.
@@ -39,8 +57,8 @@ def FindHitsPerSample(SamAlign,ChrFeatMap, Sep0N = 2,MapQ=10):
             i+=1
         
         TotalUniqueHits += len(ChrHitList[Chr])
-    return ChrHitList,TotalHits, TotalUniqueHits, SamAlign.shape[0]
-       
+    return ChrHitList,TotalHits, TotalUniqueHits, sum(hits.sum() for hits in hit_map.values())
+
 #this class gets the position of a hit and finds its nearest ORF in the specified strand (W/C) up or down stream of that index 
 class NearestORF():
     def __init__(self,Ind, Dist, Strand, UpDown):
@@ -79,26 +97,34 @@ class NearestORF():
 #this procedure find the neares ORF for a position given 
 #StartI, StopI: the position on the chormosome of the merged hit; ChrFeatMap: a vector of chromosome length with feature index if exists or 0 in any chromosome position; strand: (W/C)
 def  FindNearestORFInStrand(StartI,StopI, ChrFeatMap,Strand):
-    if ChrFeatMap[StartI]>=0: #ORF exists at hit position (first merged hit)
+    if not isinstance(ChrFeatMap[StartI], tuple): #ORF exists at hit position (first merged hit)
         return NearestORF(ChrFeatMap[StartI],0, Strand,'Up'), NearestORF(ChrFeatMap[StartI],0, Strand,'Down') 
-    elif  ChrFeatMap[StopI]>=0:  #ORF exists at hit position (last merged hit)
+    elif not isinstance(ChrFeatMap[StopI], tuple):  #ORF exists at hit position (last merged hit)
         return NearestORF(ChrFeatMap[StopI],0, Strand,'Up'), NearestORF(ChrFeatMap[StopI],0, Strand,'Down')
     else:
         upi=StartI-1 #upstream is down the index (upi will hold the chromosome position of the nearest ORF
         upF =-1      #upF will hold the feature index of the nearest ORF we found, if exists
-        while upi >= 0: #going back in chromosome till we reach its first nucleotide            
-            if ChrFeatMap[upi]>=0: #if we find a feature in current position on the chromoeoms
-                upF = ChrFeatMap[upi] #we save index of the feature we found 
-                break
-            upi -= 1
+        if not isinstance(ChrFeatMap[upi], tuple):
+            upF = ChrFeatMap[upi]
+        else:
+            new_upi = ChrFeatMap[upi][0]
+            if new_upi != -1:
+                upi = new_upi
+                upF = ChrFeatMap[upi]
+            else:
+                upi = 1
         #again with downstream ORFS
         downi=StopI+1
         DownF = -1
-        while downi < len(ChrFeatMap):            
-            if ChrFeatMap[downi]>=0:
+        if not isinstance(ChrFeatMap[downi], tuple):
+            DownF = ChrFeatMap[downi]
+        else:
+            new_downi = ChrFeatMap[downi][1]
+            if new_downi != -1:
+                downi = new_downi 
                 DownF = ChrFeatMap[downi]
-                break
-            downi+=1 
+            else:
+                downi = len(ChrFeatMap)
         #returns the closest ORF found up and down stream
         return NearestORF(upF,StartI - upi, Strand,'Up'), NearestORF(DownF, downi-StopI, Strand,'Down')
     
@@ -178,7 +204,7 @@ if __name__ == '__main__':
         Feat = ChrFeature[(ChrFeature.Chromosome==Chr) & (ChrFeature.Strand == 'W') ]
         for row in Feat.iterrows():
             #each position in the chromosome vector is assigned with the feature index relevant to it        
-                ChrFeatW[Chr][row[1].StartCoord: row[1].StopCoord+1] = row[0]
+            ChrFeatW[Chr][row[1].StartCoord: row[1].StopCoord+1] = row[0]
 
     #again, creating the a dictionary of chromosome and its feature but for the crick strand
     ChrFeatC={}
@@ -192,24 +218,47 @@ if __name__ == '__main__':
             #each position in the chromosome vector is assigned with the feature index relevant to it        
             ChrFeatC[Chr][row[1].StopCoord: row[1].StartCoord+1] = row[0]
 
-    
+    # Preprocess the ChrFeat maps to include (left, right) tuples of the nearest features for every index:
+    for feat_map in (ChrFeatC, ChrFeatW):
+        for chrom_name in feat_map:
+            chrom = map(int, feat_map[chrom_name])
+            prev_feat_ix = next_feat_ix = -1
+            i = 1
+            while i < len(chrom):
+                if chrom[i] != -1:
+                    prev_feat_ix = i
+                    i += 1
+                else:
+                    # Find the next feature!
+                    next_feat_ix = -1
+                    j = i+1
+                    while j < len(chrom):
+                        if chrom[j] != -1:
+                            next_feat_ix = j
+                            break
+                        j += 1
+                    for k in range(i, j):
+                        chrom[k] = (prev_feat_ix, next_feat_ix)
+                    i = j
+            feat_map[chrom_name] = chrom
+
 
     if len(GeneListFileDir) > 0 and not os.path.isdir(GeneListFileDir): 
         os.makedirs(GeneListFileDir)
+    
 
-
-    fNames = glob.glob(os.path.join(SamFileDir, '*.sam'))
+    fNames = glob.glob(os.path.join(SamFileDir, '*.bam')) # TODO: should be able to read from both SAM and BAM with pysam.
     #going over all sam files in a given directory and for each creating a hit file, by uniting close hits and check thier nearest ORFS
     for Name in fNames:
         BaseName = os.path.basename(Name)
         OutFileName = os.path.join(GeneListFileDir, BaseName[:-4] + '_Hits.txt')
         if os.path.isfile(OutFileName): #check first if the file already exists as it is very time consuming. if we want to re create the hit file, just delete or rename it
             continue;
-        Sami = pd.read_table(Name, skiprows =19, names=SamCols, dtype = SamColsTypes)
-        print "parsing file {}, with {} hits".format(BaseName, Sami.shape[0])
+        Sami = pysam.AlignmentFile(Name, "rb")
+        print "parsing file {}".format(BaseName)
         MyList,TotalHits, TotalUniqueHits, TotalReads = FindHitsPerSample(Sami,ChrFeatW, MergeDist,MapQ) 
         ListHitProp(MyList, OutFileName, ChrFeatC, ChrFeatW ) 
         print "total hits positions (Map quality > {}): {:,}".format(MapQ,TotalHits)
         print "Unique hits position (minimal dist = {} bp) : {:,}".format(MergeDist,TotalUniqueHits)
         print 'total reads found: {:,} (Map quality = {})'.format(TotalReads,MapQ)
-	
+        
