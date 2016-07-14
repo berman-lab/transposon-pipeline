@@ -1,17 +1,15 @@
 import glob, os
 import zlib
-import pandas as pd
 import gzip
 from Bio.Seq import Seq
-import numpy as np
 from Bio.Alphabet import generic_dna
 import subprocess
 from subprocess import PIPE, Popen
-CutAdaptCMD = '/usr/local/lib/python2.7/dist-packages/cutadapt/bin/cutadapt'
+CutAdaptCMD = '/Users/vladimirg/Library/Python/2.7/bin/cutadapt'
 TnPrimerAndTail = 'GTATTTTACCGACCGTTACCGACCGTTTTCATCCCTA'
-BowtiePath = '/specific/fprivate/bnet/yaelsilb/delib/bowtie2-2.2.6/'
-CInd = '/home/bnet/yaelsilb/delib/data/5314/5314_s05-m05-r12'
-
+BowtiePath = '/usr/local/bin/'
+CInd = 'dependencies/5314_A22_HapA'
+CORES = 6 # How many cores on the machine = how many threads should the external tools utilize
 
 def GetReads(Val,Text):
     Sub = Text[Text.find(Val)+len(Val)+1:].lstrip(' ')
@@ -79,10 +77,21 @@ if __name__ == '__main__':
     #aligning fastq file to the reference genome
     #-x reference_genome; -U fq file of unpaired reads; -S output SAM alignment file; X is the max fragment size to consider (relevant only in paired end)
     SamfName = os.path.join(OutputDir, os.path.splitext(os.path.basename(FastqFName))[0] + '.sam')
-    BowtieCmd = BowtiePath + 'bowtie2 -x '+ CInd + ' -U ' + CleanfName + ' -S ' + SamfName
+    BowtieCmd = BowtiePath + 'bowtie2 -p ' + str(CORES) + ' -x '+ CInd + \
+                ' -U ' + CleanfName + ' -S ' + SamfName
     Output,err = cmdline(BowtieCmd)
     # converting to bam file 
-    cmdline('samtools view -bS '+ SamfName + ' > '+ os.path.splitext(SamfName)[0]+".bam")
+    cmdline('samtools view -@ ' + str(CORES) + ' -bS '+ SamfName + ' > ' +
+            os.path.splitext(SamfName)[0] + ".bam")
     #sorting and indexing 
-    cmdline('samtools sort '+os.path.splitext(SamfName)[0]+'.bam ' + os.path.splitext(SamfName)[0]+'.sorted')
-    cmdline('samtools index '+os.path.splitext(SamfName)[0]+'.sorted.bam')
+    cmdline('samtools sort -@ ' + str(CORES) + ' ' +
+            os.path.splitext(SamfName)[0] + '.bam > ' +
+            os.path.splitext(SamfName)[0] + '.sorted.bam')
+    cmdline('samtools index ' + os.path.splitext(SamfName)[0] + '.sorted.bam')
+
+    # Remove intermediats:
+    # os.remove(FastqFName) # By default, don't remove the original FASTQ.
+    os.remove(CleanfName)
+    os.remove(SamfName)
+    os.remove(os.path.splitext(SamfName)[0] + '.bam')
+    
