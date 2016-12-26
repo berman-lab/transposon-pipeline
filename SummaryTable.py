@@ -243,6 +243,8 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size):
                 "freedom_index": float(max_free_region) / len(feature),
                 # The value is singular, to get the coefficient we subtract the pre from the post later on:
                 "s_value": log2(reads_in_feature) - total_reads_log,
+                # Note: the positions are relative to the genome, NOT the gene:
+                "hit_locations": [ix+1 for (ix, hit) in enumerate(hits_in_feature) if hit > 0],
             }
             
         result.update(records)
@@ -773,6 +775,29 @@ def write_hits_into_bed(target_file, hits):
                            (hit["chrom"], hit["hit_pos"] - 1, hit["hit_pos"], hit["hit_count"],
                             {'W': '+', 'C': '-'}[hit["source"]]))
 
+def write_analyzed_hits_into_bed_proteome(target_file, records):
+    """Write a given hit list into a BED-format file that represents protein.
+    
+    Note
+    ----
+    
+    This function ignores introns - genes with introns will not be displayed correctly!
+    """
+    
+    with open(target_file, 'w') as bed_file:
+        bed_file.write("#orf\torfStart\torfEnd\n")
+        for record in sorted(records, key=lambda r: r["feature"].standard_name):
+            feature = record["feature"]
+            aa_hits = sorted(set( ((h-1)/3)+1 for h in record["hit_locations"] ))
+            if feature.strand == 'C':
+                # As the hit locations are relative to the genome, that is the
+                # Watson strand, we have to reverse them if the feature is
+                # translated from the Crick strand. 
+                feature_len = len(feature) / 3
+                aa_hits = [feature_len - h + 1 for h in aa_hits]
+            for aa_hit in sorted(set( ((h-1)/3)+1 for h in record["hit_locations"] )):
+                bed_file.write("%s\t%d\t%d\n" % (record["feature"].standard_name, aa_hit, aa_hit+1))
+
 if __name__ == "__main__":    
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input-dir")
@@ -805,13 +830,11 @@ if __name__ == "__main__":
     all_analyzed = [analyze_hits(dataset, alb_db, 10000) for dataset in all_hits]
     for fname, analysis in zip(input_filenames, all_analyzed):
         write_analyzed_alb_records(analysis.values(), os.path.join(output_dir, fname + "_analysis.csv"))
+        draw_histogram_of_analysis(analysis, os.path.join(output_dir, fname))
+        write_analyzed_hits_into_bed_proteome(os.path.join(output_dir, fname + ".proteome.filter_%d.bed" % read_depth_filter), analysis.values())
     
     compare_insertion_and_neighborhood((input_filenames, all_analyzed),
-                                       os.path.join(output_dir, "insertion_vs_neighborhood_correlations.txt"))
-
-    # Draw histograms:
-    for fname, dataset in zip(input_filenames, all_analyzed):
-        draw_histogram_of_analysis(dataset, os.path.join(output_dir, fname))
+                                       os.path.join(output_dir, "insertion_vs_neighborhood_correlations.txt"))    
     
     # Statistics:
     with open(os.path.join(args.output_dir, "stats.csv"), 'w') as stats_file:
