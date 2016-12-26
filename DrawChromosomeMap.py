@@ -1,15 +1,14 @@
 import glob, os
 import pandas as pd
-import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import matplotlib as mpl
 from matplotlib.patches import Ellipse, Rectangle
-from subprocess import PIPE, Popen
-import datetime
-ChrfName = '/home/bnet/yaelsilb/delib/data/5314/SC5314_A22_Haploid_A.fa' #move to configuration file
-CentromersfName = '/home/bnet/yaelsilb/delib/data/5314/CentormersA.txt'
+ChrfName = 'dependencies/albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes_HapA.fasta'
+
+# TODO: currently, there is no centromere file. We should read it (and the MRS locations)
+# from a standard CGD data file.
+CentromersfName = 'dependencies/albicans/reference genome/CentormersA.txt'
 
 #do we use MRS and centromeres? sould be taken from the feature file..
 MRS = {'Ca22chrRA_C_albicans_SC5314':[(1,1407),(429937,428531),(1360337,1346420)],'Ca22chr2A_C_albicans_SC5314':\
@@ -35,7 +34,7 @@ ChrsOrder = ['Ca22chrRA_C_albicans_SC5314', 'Ca22chr1A_C_albicans_SC5314','Ca22c
              
         
         
-def DrwaChrMapRelative(Hits,SampleName, FileName ='', ylim = 0):
+def DrawChrMapRelative(Hits,SampleName, FileName ='', ylim = 0):
     plt.figure(figsize=(30,4*len(ChrsOrder)))
     plt.gcf().suptitle(SampleName, fontsize=22,fontweight = 'bold', y = 0.92, x = 0.2)
     for i in range(8):#(len(ChrsOrder)):
@@ -48,8 +47,8 @@ def DrwaChrMapRelative(Hits,SampleName, FileName ='', ylim = 0):
         ax.set_xlim([0,ChrLen[ChrsOrder[i]]])
         ax.tick_params(axis='both', which='major', labelsize=14)
     
-        #add cenromere
-        #xPos = (Centormers[Centormers.Chr == ChrsOrder[i]].Left.values[0] + Centormers[Centormers.Chr == ChrsOrder[i]].Right.values[0] )/2 
+        #add centromere
+        #xPos = (Centromers[Centormers.Chr == ChrsOrder[i]].Left.values[0] + Centormers[Centormers.Chr == ChrsOrder[i]].Right.values[0] )/2 
         xPos = min(Centormers[Centormers.Chr == ChrsOrder[i]].Left.values[0], Centormers[Centormers.Chr == ChrsOrder[i]].Right.values[0] ) #the location is left and not center!
         xWidth = abs(Centormers[Centormers.Chr == ChrsOrder[i]].Left.values[0]- Centormers[Centormers.Chr == ChrsOrder[i]].Right.values[0] ) 
         Cen = Ellipse(xy=(xPos, 0), width=20000, height=ylim/10,  edgecolor='r', fc='r', lw=2, clip_on=False) #used to be height= 500
@@ -107,4 +106,4 @@ if __name__ == '__main__':
         if os.path.isfile(OutName):
             continue
         Hits = pd.read_table(fName)
-        DrwaChrMapRelative(Hits,BaseName, OutName, yLim)
+        DrawChrMapRelative(Hits,BaseName, OutName, yLim)
