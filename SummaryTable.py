@@ -800,8 +800,8 @@ def write_analyzed_hits_into_bed_proteome(target_file, records):
 
 if __name__ == "__main__":    
     parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input-dir")
-    parser.add_argument("-o", "--output-dir")
+    parser.add_argument("-i", "--input-dir", required=True)
+    parser.add_argument("-o", "--output-dir", required=True)
     parser.add_argument("-f", "--read-depth-filter", type=int, default=1)
     args = parser.parse_args()
     
