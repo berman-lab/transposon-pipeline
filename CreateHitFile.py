@@ -5,7 +5,7 @@ import pysam
 import itertools
 
 # TODO: move to config file.
-ChrFile = 'dependencies/albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes.fasta'
+ChrFile = 'dependencies/albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes_HapA.fasta'
 FeatureFName = 'dependencies/albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomal_feature.tab'
 
 SamCols = ['ReadName','FlagSum', 'Chr','Pos','MapQuality','CIGAR','MateChr','MatePos','InsertSize','ReadSeq','ReadQualities',\
