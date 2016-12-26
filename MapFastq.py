@@ -5,11 +5,11 @@ from Bio.Seq import Seq
 from Bio.Alphabet import generic_dna
 import subprocess
 from subprocess import PIPE, Popen
-CutAdaptCMD = '/Users/vladimirg/Library/Python/2.7/bin/cutadapt'
+CutAdaptCMD = '/usr/local/bin/cutadapt'
 TnPrimerAndTail = 'GTATTTTACCGACCGTTACCGACCGTTTTCATCCCTA'
 BowtiePath = '/usr/local/bin/'
-CInd = 'dependencies/5314_A22_HapA'
-CORES = 6 # How many cores on the machine = how many threads should the external tools utilize
+CInd = 'dependencies/albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes_HapA'
+CORES = 4 # How many cores on the machine = how many threads should the external tools utilize
 
 def GetReads(Val,Text):
     Sub = Text[Text.find(Val)+len(Val)+1:].lstrip(' ')
@@ -33,9 +33,9 @@ def cmdline(command):
     return process.communicate()
 
 def RemoveTn(InputFileName, TnSeq, overlap, OutputFName):
-    #-g is from the beggining and -a is from the end or cive versa (if we use -a we get only a string length 6, which is probably the 6 Ns between the primer and Tn)
+    #-g is from the beggining and -a is from the end or vice versa (if we use -a we get only a string length 6, which is probably the 6 Ns between the primer and Tn)
     #-o out put, afterwards the input. --overlap determines the minimal number of bases found from the Tn
-    cmdl = CutAdaptCMD + ' -g ' + TnSeq + ' -o '+ OutputFName + ' ' + InputFileName + ' --discard-untrimmed --overlap ' + str(overlap)
+    cmdl = CutAdaptCMD + ' -g ' + TnSeq + ' -o "'+ OutputFName + '" "' + InputFileName + '" --discard-untrimmed --overlap ' + str(overlap)
     Output,err = cmdline(cmdl)
     return ProcessOutput(Output)
     
@@ -78,16 +78,16 @@ if __name__ == '__main__':
     #-x reference_genome; -U fq file of unpaired reads; -S output SAM alignment file; X is the max fragment size to consider (relevant only in paired end)
     SamfName = os.path.join(OutputDir, os.path.splitext(os.path.basename(FastqFName))[0] + '.sam')
     BowtieCmd = BowtiePath + 'bowtie2 -p ' + str(CORES) + ' -x '+ CInd + \
-                ' -U ' + CleanfName + ' -S ' + SamfName
+                ' -U "' + CleanfName + '" -S "' + SamfName + '"'
     Output,err = cmdline(BowtieCmd)
     # converting to bam file 
-    cmdline('samtools view -@ ' + str(CORES) + ' -bS '+ SamfName + ' > ' +
-            os.path.splitext(SamfName)[0] + ".bam")
+    cmdline('samtools view -@ ' + str(CORES) + ' -bS "'+ SamfName + '" > "' +
+            os.path.splitext(SamfName)[0] + '.bam"')
     #sorting and indexing 
-    cmdline('samtools sort -@ ' + str(CORES) + ' ' +
-            os.path.splitext(SamfName)[0] + '.bam > ' +
-            os.path.splitext(SamfName)[0] + '.sorted.bam')
-    cmdline('samtools index ' + os.path.splitext(SamfName)[0] + '.sorted.bam')
+    cmdline('samtools sort -@ ' + str(CORES) + ' "' +
+            os.path.splitext(SamfName)[0] + '.bam" > "' +
+            os.path.splitext(SamfName)[0] + '.sorted.bam"')
+    cmdline('samtools index "' + os.path.splitext(SamfName)[0] + '.sorted.bam"')
 
     # Remove intermediats:
     # os.remove(FastqFName) # By default, don't remove the original FASTQ.
