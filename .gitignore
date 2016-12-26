@@ -1,3 +1,14 @@
+# Don't upload unpublished data to git:
+dependencies/Kornmann
+dependencies/albicans/pre hit data
+dependencies/albicans/post hit data
+
+# Don't upload any caches:
+dependencies/Kornmann/cached_sc_track_hits.dat
+
+# Ignore the convenience output folder:
+output/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
