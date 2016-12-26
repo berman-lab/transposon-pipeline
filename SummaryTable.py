@@ -795,7 +795,7 @@ def write_analyzed_hits_into_bed_proteome(target_file, records):
                 # translated from the Crick strand. 
                 feature_len = len(feature) / 3
                 aa_hits = [feature_len - h + 1 for h in aa_hits]
-            for aa_hit in sorted(set( ((h-1)/3)+1 for h in record["hit_locations"] )):
+            for aa_hit in aa_hits:
                 bed_file.write("%s\t%d\t%d\n" % (record["feature"].standard_name, aa_hit, aa_hit+1))
 
 if __name__ == "__main__":    
