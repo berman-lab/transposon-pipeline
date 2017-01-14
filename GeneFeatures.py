@@ -19,6 +19,7 @@ All indices are 1-based.
 """
 
 import Shared
+from Bio import SeqIO
 
 class _FeatureDB(object):
     """The base class for genome feature databases.
@@ -46,7 +47,7 @@ class _FeatureDB(object):
         integers as well as strings.
     """
     
-    def __init__(self, features):
+    def __init__(self, features, fasta_file=None):
         self._features = tuple(features) # Read-only copy
         self._name_map = {}
         self._chrom_features = {}
@@ -81,7 +82,7 @@ class _FeatureDB(object):
         for chrom in self._chrom_features:
             self._chrom_names[chrom] = chrom
             
-        self._create_chrom_cache()
+        self._create_chrom_cache(fasta_file)
     
     # Returns the features sorted by their .start attribute.
     def get_features_at_location(self, chrom, location):
@@ -163,9 +164,11 @@ class _FeatureDB(object):
         return result
 
     def get_last_effective_chrom_index(self, chrom):
-        """Return the last chromosome position that is accessible."""
+        """Return the last chromosome position that is accessible.
         
-        # TODO: we need real chromosome lengths.
+        Useful when chromosome lengths from the a reference FASTA file are not
+        available."""
+        
         chrom = self._chrom_names[chrom]
         return max(f.stop for f in self._chrom_features[chrom])
 
@@ -220,10 +223,17 @@ class _FeatureDB(object):
 
         return DisjointRange(inverse_range)
 
-    def _create_chrom_cache(self):
+    def _create_chrom_cache(self, fasta_file=None):
         self._cached_chroms = {}
+        
+        chrom_lens = {}
+        if fasta_file is not None:
+            with open(fasta_file, "r") as handle:
+                for record in SeqIO.parse(handle, "fasta"):
+                    chrom_lens[record.id] = len(record)
+            
         for name in self._chrom_features:
-            self._cached_chroms[name] = Chromosome(name, self)
+            self._cached_chroms[name] = Chromosome(name, chrom_lens.get(name), self)
 
     def __getitem__(self, key):
         # Use caching because creating the chromosome may trigger expensive
@@ -237,7 +247,7 @@ class _FeatureDB(object):
 class AlbicansFeatureDB(_FeatureDB):
     A21, A22 = (21, 22)
     
-    def __init__(self, feature_filename):
+    def __init__(self, feature_filename, fasta_file=None):
         features = []
         with open(feature_filename, "r") as in_file:
             for line in in_file:
@@ -259,7 +269,7 @@ class AlbicansFeatureDB(_FeatureDB):
                 
                 features.append(feature)
                 
-        super(AlbicansFeatureDB, self).__init__(features)
+        super(AlbicansFeatureDB, self).__init__(features, fasta_file)
         
         # Enrich the chromosome name maps:
         if self.assembly == AlbicansFeatureDB.A21:
@@ -273,7 +283,7 @@ class AlbicansFeatureDB(_FeatureDB):
             self._chrom_names[str(chrom_shorthand)] = chrom_name
 
 class CerevisiaeFeatureDB(_FeatureDB):
-    def __init__(self, feature_filename):
+    def __init__(self, feature_filename, fasta_file=None):
         features = []
         with open(feature_filename, 'r') as in_file:
             for line in in_file:
@@ -287,7 +297,7 @@ class CerevisiaeFeatureDB(_FeatureDB):
                 
                 features.append(feature)
                 
-        super(CerevisiaeFeatureDB, self).__init__(features)
+        super(CerevisiaeFeatureDB, self).__init__(features, fasta_file)
         
         self._chrom_names.update({"chrI" : "1", "chrII" : "2", "chrIII" : "3", "chrIV" : "4",
                                   "chrV" : "5", "chrVI" : "6", "chrVII" : "7", "chrVIII" : "8",
@@ -299,10 +309,10 @@ class Chromosome(object):
     
     Mostly for convenience, as it wraps _FeatureDB methods."""
     
-    def __init__(self, name, alb_db):
+    def __init__(self, name, length, alb_db):
         self._name = self.name = name
         self._db = alb_db
-        self._len = alb_db.get_last_effective_chrom_index(name)
+        self._len = alb_db.get_last_effective_chrom_index(name) if length is None else length
 
     def __len__(self):
         return self._len
@@ -509,4 +519,5 @@ def get_pombe_genes():
 
 # The default feature DBs, for convenience.
 cer_db = CerevisiaeFeatureDB(Shared.get_dependency("cerevisiae/SGD_features.tab"))
-alb_db = AlbicansFeatureDB(Shared.get_dependency("albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomal_feature.tab"))
+alb_db = AlbicansFeatureDB(Shared.get_dependency("albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomal_feature.tab"),
+                           Shared.get_dependency("albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes.fasta"))
