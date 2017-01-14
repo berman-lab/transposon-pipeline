@@ -13,6 +13,7 @@ import Shared
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.patches import Ellipse, Rectangle
 
 def read_hit_files(files):
     """Read in the list of hits files."""
@@ -760,6 +761,59 @@ def draw_histogram(histogram, sample_name, file_name, bins, ylim=300):
     plt.savefig(file_name)
      
     plt.close()
+    
+def draw_chrom_map(data, bin_size, title, y_max, outfile):
+    chroms = list(alb_db)
+    chroms.sort(key=lambda c: c.name)
+    max_chrom_len = max(len(c) for c in chroms)
+    
+    plt.figure(figsize=(30, 4*len(chroms)))
+    plt.gcf().suptitle(title, fontsize=22, fontweight='bold', y=0.92, x=0.2)
+    
+    ade2 = alb_db.get_feature_by_name("ADE2")
+    
+    for chrom_ix, chrom in enumerate(chroms):
+        chrom_display_name = chrom.name[4:8].capitalize()
+        
+        ax = plt.subplot2grid((len(chroms), 100),
+                              (chrom_ix, 0),
+                              colspan=len(chrom)*100/max_chrom_len)
+        
+        #adding the last position as 0/ 1 so the plot won't be shorter    
+        ax.bar(range(len(data[chrom.name])), data[chrom.name])
+        ax.set_ylabel(chrom_display_name, fontsize = 20, fontweight = 'bold')
+        ax.set_ylim([0, y_max])
+        ax.set_xlim([0, len(data[chrom.name])])
+        ax.tick_params(axis='both', which='major', labelsize=14)
+    
+        patches = {
+            "centromere": "red",
+            "repeat_region": "green",
+            "long_terminal_repeat": "brown",
+            "tRNA|Verified": "yellow",
+            "tRNA|Uncharacterized": "yellow",
+            "retrotransposon": "black"
+        }
+        for feature in chrom.get_features():
+            if feature.type not in patches:
+                continue
+            ax.add_patch(Rectangle((float(feature.start)/bin_size, 0),
+                                   width=float(len(feature))/bin_size,
+                                   height=-y_max/10.0,
+                                   fc=patches[feature.type],
+                                   ec=patches[feature.type],
+                                   clip_on=False))
+            
+        if chrom.name == ade2.chromosome:
+            ax.add_patch(Rectangle((ade2.start/bin_size, 0),
+                                   width=1,
+                                   height=-y_max/10.0,
+                                   fc="purple",
+                                   ec="purple",
+                                   clip_on=False))
+            
+    plt.savefig(outfile)
+    plt.close()
 
 def write_hits_into_bed(target_file, hits):
     """Write a given hit list into a BED-format file.
@@ -798,6 +852,29 @@ def write_analyzed_hits_into_bed_proteome(target_file, records):
             for aa_hit in aa_hits:
                 bed_file.write("%s\t%d\t%d\n" % (record["feature"].standard_name, aa_hit, aa_hit+1))
 
+def make_hit_map(hits, bin_size):
+    result = {chrom.name: [0]*(len(chrom)/bin_size + 1) for chrom in alb_db}
+    
+    for hit in hits:
+        result[hit["chrom"]][hit["hit_pos"]/bin_size] += 1
+    
+    return result
+
+def make_read_map(hits, bin_size):
+    result = {chrom.name: [0]*(len(chrom)/bin_size + 1) for chrom in alb_db}
+    
+    for hit in hits:
+        result[hit["chrom"]][hit["hit_pos"]/bin_size] += hit["hit_count"]
+    
+    return result
+
+def transform_read_map_to_log(read_map, base):
+    for data in read_map.values():
+        for ix in range(len(data)):
+            data[ix] = math.log(data[ix], base) if data[ix] > 0 else 0
+    
+    return read_map
+
 if __name__ == "__main__":    
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input-dir", required=True)
@@ -825,6 +902,18 @@ if __name__ == "__main__":
             if obj["hit_count"] >= args.read_depth_filter:
                 filtered_dataset.append(obj)
     all_hits = all_filtered_hits
+    
+    bin_size = 10000
+    for fname, hits in zip(input_filenames, all_hits):
+        hit_map = make_hit_map(hits, bin_size)
+        read_map = make_read_map(hits, bin_size)
+        # NB: using a different log base doesn't affect the final figure much,
+        # as the relationships between the values stay the same no matter what
+        # base is used. 
+        log_read_map = transform_read_map_to_log(make_read_map(hits, bin_size), 10)
+        draw_chrom_map(hit_map, bin_size, "Hits/10000 bps", 500, os.path.join(output_dir, "hit_map.%s.png" % fname))
+        draw_chrom_map(log_read_map, bin_size, "Log10 reads/10000 bps", 7, os.path.join(output_dir, "log10_read_map.%s.png" % fname))
+        draw_chrom_map(read_map, bin_size, "Reads/10000 bps", 100000, os.path.join(output_dir, "read_map.%s.png" % fname))
     
     # Deep summary:
     all_analyzed = [analyze_hits(dataset, alb_db, 10000) for dataset in all_hits]
