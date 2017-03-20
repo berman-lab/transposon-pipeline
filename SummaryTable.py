@@ -87,16 +87,24 @@ def read_hit_file(filename, read_depth_filter=1):
                 
     return result
 
-TOTAL_HITS = "total hits"
-TOTAL_READS = "total reads"
-AVG_READS_PER_HIT = "mean reads per hit"
-ORF_HITS = "hits in ORFs"
-ANNOTATED_FEATURE_HITS = "hits in annotated features"
-INTERGENIC_HITS = "intergenic hits"
-FEATURES_HIT = "# of features hit"
+TOTAL_HITS = "Total Hits"
+TOTAL_READS = "Total Reads"
+AVG_READS_PER_HIT = "Mean Reads Per Hit"
+ORF_HITS = "Hits in ORFs"
+ANNOTATED_FEATURE_HITS = "Hits in Genomic Features"
+PER_ANNOTATED_FEATURE_HITS = "% of hits in features"
+INTERGENIC_HITS = "Intergenic Hits"
+PER_INTERGENIC_HITS = "% of intergenic hits"
+FEATURES_HIT = "No. of Features Hit"
+PER_FEATURES_HIT = "% of features hit"
+AVG_HITS_IN_FEATURE = "Mean hits per feature"
+AVG_READS_IN_FEATURE = "Mean reads per feature"
+AVG_READS_IN_FEATURE_HIT = "Mean reads per hit in feature"
+READS_IN_FEATURES = "Total reads in features"
 
-ALL_STATS = [TOTAL_HITS, FEATURES_HIT, TOTAL_READS, AVG_READS_PER_HIT,
-             ANNOTATED_FEATURE_HITS, ORF_HITS, INTERGENIC_HITS]
+ALL_STATS = [TOTAL_READS, TOTAL_HITS, PER_ANNOTATED_FEATURE_HITS, PER_INTERGENIC_HITS,
+             PER_FEATURES_HIT, AVG_HITS_IN_FEATURE, AVG_READS_IN_FEATURE, 
+             AVG_READS_PER_HIT, AVG_READS_IN_FEATURE_HIT]
 
 def get_statistics(dataset, feature_db):
     """Get general statistics about hit files.
@@ -115,21 +123,29 @@ def get_statistics(dataset, feature_db):
     result[ORF_HITS] = 0
     result[ANNOTATED_FEATURE_HITS] = 0
     result[INTERGENIC_HITS] = 0
+    result[READS_IN_FEATURES] = 0
     
-    orfs_hit = set()
+    features_hit = set()
     for hit in dataset:
         features = feature_db.get_features_at_location(hit["chrom"], hit["hit_pos"])
         if len(features) == 0:
             continue
         result[ANNOTATED_FEATURE_HITS] += 1
-        orfs_hit.update(set( f.standard_name for f in features ))
+        result[READS_IN_FEATURES] += hit["hit_count"]
+        features_hit.update(set( f.standard_name for f in features ))
         for f in features:
             if f.is_orf:
                 result[ORF_HITS] += 1
                 break
     
     result[INTERGENIC_HITS] = result[TOTAL_HITS] - result[ANNOTATED_FEATURE_HITS]
-    result[FEATURES_HIT] = len(orfs_hit)
+    result[FEATURES_HIT] = len(features_hit)
+    result[PER_INTERGENIC_HITS] = "%.2f%%" % (result[INTERGENIC_HITS] * 100.0 /  result[TOTAL_HITS])
+    result[PER_ANNOTATED_FEATURE_HITS] = "%.2f%%" % (result[ANNOTATED_FEATURE_HITS] * 100.0 /  result[TOTAL_HITS])
+    result[PER_FEATURES_HIT] = "%.2f%%" % (result[FEATURES_HIT] * 100.0 / len(alb_db.get_all_features()))
+    result[AVG_HITS_IN_FEATURE] = "%.1f" % (result[ANNOTATED_FEATURE_HITS] * 1.0 / result[FEATURES_HIT])
+    result[AVG_READS_IN_FEATURE] = result[READS_IN_FEATURES] / result[FEATURES_HIT]
+    result[AVG_READS_IN_FEATURE_HIT] = result[READS_IN_FEATURES] / result[ANNOTATED_FEATURE_HITS]
     
     return result
 
