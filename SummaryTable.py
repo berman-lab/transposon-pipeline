@@ -149,7 +149,7 @@ def get_statistics(dataset, feature_db):
     
     return result
 
-def analyze_hits(dataset, feature_db, neighborhood_window_size):
+def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
     """Analyze a hit dataset into a feature dataset.
     
     Attributes
@@ -214,7 +214,7 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size):
         for feature in feature_db[chrom]:
             hits_in_feature = hits_in_features[feature.start:feature.stop+1]
             hits_in_feature_count = hits_in_feature.sum()
-            reads_in_feature = reads_across_chrom[feature.start:feature.stop+1].sum() + 1 # So as to not get a log of 0
+            reads_in_feature = reads_across_chrom[feature.start:feature.stop+1].sum()
             
             # The borders of the neighborhood window:
             window_start = max(1, feature.start - neighborhood_window_size)
@@ -268,6 +268,7 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size):
                 "feature": feature,
                 "length": len(feature),
                 "hits": hits_in_feature_count,
+                "reads": reads_in_feature,
                 # Can be tested downstream for zero:
                 "neighborhood_hits":  hits_outside_feature_count,
                 "insertion_index": insertion_index,
@@ -277,7 +278,7 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size):
                 "max_free_region": max_free_region,
                 "freedom_index": float(max_free_region) / len(feature),
                 # The value is singular, to get the coefficient we subtract the pre from the post later on:
-                "s_value": log2(reads_in_feature) - total_reads_log,
+                "s_value": log2(reads_in_feature + 1) - total_reads_log, # Add 1 so as to not get a log 0
                 # Note: the positions are relative to the genome, NOT the gene:
                 "hit_locations": [ix+1 for (ix, hit) in enumerate(hits_in_feature) if hit > 0],
             }
@@ -352,7 +353,13 @@ def write_analyzed_alb_records(records, output_file):
             "csv_name": "Hits",
             "format": "%d"
         },
-                   
+        
+        {
+            "field_name": "reads",
+            "csv_name": "Reads",
+            "format": "%d"
+        },
+        
         {
             "field_name": "feature",
             "csv_name": "Length",
