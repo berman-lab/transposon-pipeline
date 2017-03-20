@@ -869,31 +869,87 @@ def draw_chrom_map(data, bin_size, title, y_max, outfile):
     chroms.sort(key=lambda c: c.name)
     max_chrom_len = max(len(c) for c in chroms)
     
-    plt.figure(figsize=(30, 4*len(chroms)))
+    fig = plt.figure(figsize=(30, 4*len(chroms)))
     plt.gcf().suptitle(title, fontsize=22, fontweight='bold', y=0.92, x=0.2)
     
     ade2 = alb_db.get_feature_by_name("ADE2")
     
-    for chrom_ix, chrom in enumerate(chroms):
-        chrom_display_name = chrom.name[4:8].capitalize()
-        
-        ax = plt.subplot2grid((len(chroms), 100),
-                              (chrom_ix, 0),
-                              colspan=len(chrom)*100/max_chrom_len)
-        
-        #adding the last position as 0/ 1 so the plot won't be shorter    
-        ax.bar(range(len(data[chrom.name])), data[chrom.name])
-        ax.set_ylabel(chrom_display_name, fontsize = 20, fontweight = 'bold')
-        ax.set_ylim([0, y_max])
-        ax.set_xlim([0, len(data[chrom.name])])
-        ax.tick_params(axis='both', which='major', labelsize=14)
+    # How many chromosomes should we display?
+    row_num = len(chroms)
+    for chrom in chroms:
+        d = data[chrom.name]
+        if max(d) > y_max:
+            row_num += 1
     
+    # Start drawing each chromosome:
+    base_row = 0
+    for chrom in sorted(chroms, key=lambda c: int(c.name[7]) if c.name[7] != "R" else 0):
+        chrom_display_name = chrom.name[4].capitalize() + chrom.name[5:8]
+        chrom_data = data[chrom.name]
+        
+        if max(chrom_data) <= y_max:
+            # The data in the chromosome does not exceed the y maximum, draw
+            # it as usual.
+            ax = plt.subplot2grid((row_num, 100),
+                                  (base_row, 0),
+                                  colspan=len(chrom)*100/max_chrom_len)
+            ax.set_ylim([0, y_max])
+            base_row += 1
+        elif max(chrom_data) <= y_max * 2:
+            # The data in the chromosome is less than twice as large as the
+            # maximum, allocate it twice the space and draw as usual. 
+            ax = plt.subplot2grid((row_num, 100),
+                                  (base_row, 0),
+                                  rowspan=2,
+                                  colspan=len(chrom)*100/max_chrom_len)
+            ax.set_ylim([0, y_max*2])
+            base_row += 2
+        else:
+            # The data in the chromosome is too large (twice than the maximum y
+            # value), and so will undergo a jump-cut along the y axis.
+            ax = plt.subplot2grid((row_num, 100),
+                                  (base_row+1, 0),
+                                  colspan=len(chrom)*100/max_chrom_len)
+            ax.set_ylim([0, y_max])
+            ax2 = plt.subplot2grid((row_num, 100),
+                                   (base_row, 0),
+                                   colspan=len(chrom)*100/max_chrom_len,
+                                   sharex=ax)
+            max_top_y = max(chrom_data) / 100 * 100 + 100
+            top_y = [max_top_y - y_max, max_top_y]
+            base_row += 2
+            
+            ax2.set_ylim(top_y)
+            ax2.bar(range(len(chrom_data)), chrom_data)
+            
+            ax2.spines['bottom'].set_visible(False)
+            ax.spines['top'].set_visible(False)
+            ax2.xaxis.tick_top()
+            ax2.tick_params(labeltop='off')  # don't put tick labels at the top
+            ax.xaxis.tick_bottom()
+            
+            d = .015  # how big to make the diagonal lines in axes coordinates
+            # arguments to pass to plot, just so we don't keep repeating them
+            kwargs = dict(transform=ax2.transAxes, color='k', clip_on=False)
+            ax2.plot((-d, +d), (-d, +d), **kwargs)        # top-left diagonal
+            ax2.plot((1 - d, 1 + d), (-d, +d), **kwargs)  # top-right diagonal
+            
+            kwargs.update(transform=ax.transAxes)  # switch to the bottom axes
+            ax.plot((-d, +d), (1 - d, 1 + d), **kwargs)  # bottom-left diagonal
+            ax.plot((1 - d, 1 + d), (1 - d, 1 + d), **kwargs)  # bottom-right diagonal
+        
+        # Adding the last position as 0/1 so the plot won't be shorter:    
+        ax.bar(range(len(chrom_data)), chrom_data)
+        ax.set_ylabel(chrom_display_name, fontsize = 20, fontweight = 'bold')
+        ax.set_xlim([0, len(chrom_data)])
+        ax.tick_params(axis='both', which='major', labelsize=14)
+        
         patches = {
             "centromere": "red",
             "repeat_region": "green",
-            "long_terminal_repeat": "brown",
-            "tRNA|Verified": "yellow",
-            "tRNA|Uncharacterized": "yellow",
+            "long_terminal_repeat": "cyan",
+            "tRNA|Verified": "orange",
+            "tRNA|Uncharacterized": "orange",
             "retrotransposon": "black"
         }
         for feature in chrom.get_features():
