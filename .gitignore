@@ -1,7 +1,6 @@
 # Don't upload unpublished data to git:
 dependencies/Kornmann
-dependencies/albicans/pre hit data
-dependencies/albicans/post hit data
+dependencies/albicans/experiment data/
 
 # Don't upload any caches:
 dependencies/Kornmann/cached_sc_track_hits.dat
