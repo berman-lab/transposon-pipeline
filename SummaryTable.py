@@ -15,13 +15,24 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse, Rectangle
 
-def read_hit_files(files):
-    """Read in the list of hits files."""
+def read_hit_files(files, read_depth_filter=1):
+    """Read in the list of hits files.
+    
+    Attributes
+    ----------
+    read_depth_filter : int
+        The read depth below which insertion events will be ignored.
+    """
 
-    return map(read_hit_file, files)
+    return [read_hit_file(f, read_depth_filter) for f in files]
 
-def read_hit_file(filename):
+def read_hit_file(filename, read_depth_filter=1):
     """Read in the given hit file.
+    
+    Attributes
+    ----------
+    read_depth_filter : int
+        The read depth below which insertion events will be ignored.
     
     Returns
     -------
@@ -40,6 +51,11 @@ def read_hit_file(filename):
                        up_feature_dist, down_feature_type, down_feature_name, \
                        down_gene_name, down_feature_dist, ig_type, \
                        hit_pos, hit_count = line.split("\t")
+                
+                hit_count = int(hit_count)
+                if hit_count < read_depth_filter:
+                    continue       
+                
                 if "ORF" in ig_type:
                     gene_name = up_gene_name if up_gene_name != "nan" \
                             else up_feature_name
@@ -62,7 +78,7 @@ def read_hit_file(filename):
                        "down_feature_dist": down_feature_dist,
                        "ig_type": ig_type,
                        "hit_pos": int(hit_pos),
-                       "hit_count": int(hit_count),
+                       "hit_count": hit_count,
                        "gene_name": gene_name}
                 
                 result.append(obj)
@@ -891,17 +907,9 @@ if __name__ == "__main__":
     input_file_paths = glob.glob(os.path.join(input_dir, "*_Hits.txt"))
     input_filenames = [os.path.split(file_path)[-1][:-9] for file_path in input_file_paths]
     
-    all_hits = read_hit_files(input_file_paths)
+    all_hits = read_hit_files(input_file_paths, read_depth_filter)
     
-    # Filter the all_hits:
-    all_filtered_hits = []
-    for dataset in all_hits:
-        filtered_dataset = []
-        all_filtered_hits.append(filtered_dataset)
-        for obj in dataset:
-            if obj["hit_count"] >= args.read_depth_filter:
-                filtered_dataset.append(obj)
-    all_hits = all_filtered_hits
+    all_analyzed = [analyze_hits(dataset, alb_db, 10000) for dataset in all_hits]
     
     bin_size = 10000
     for fname, hits in zip(input_filenames, all_hits):
