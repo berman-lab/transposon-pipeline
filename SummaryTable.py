@@ -18,7 +18,7 @@ from matplotlib.patches import Ellipse, Rectangle
 def read_hit_files(files, read_depth_filter=1):
     """Read in the list of hits files.
     
-    Attributes
+    Parameters
     ----------
     read_depth_filter : int
         The read depth below which insertion events will be ignored.
@@ -29,7 +29,7 @@ def read_hit_files(files, read_depth_filter=1):
 def read_hit_file(filename, read_depth_filter=1):
     """Read in the given hit file.
     
-    Attributes
+    Parameters
     ----------
     read_depth_filter : int
         The read depth below which insertion events will be ignored.
@@ -152,7 +152,7 @@ def get_statistics(dataset, feature_db):
 def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
     """Analyze a hit dataset into a feature dataset.
     
-    Attributes
+    Parameters
     ----------
     dataset : list of dict
         The hit list, requires that each hit have a "hit_pos", "hit_count" and
