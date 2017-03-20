@@ -7,6 +7,7 @@ import glob
 import scipy.stats
 import numpy as np
 import math
+import itertools
 import pandas as pd
 import Shared
 
@@ -757,6 +758,66 @@ def compare_insertion_and_neighborhood((analysis_labels, analyses), output_file)
             pearson = scipy.stats.pearsonr(s1, s2)
             spearman = scipy.stats.spearmanr(s1, s2)
             out_file.write("%s\nPearson: %s\nSpearman: %s\n" % (label, pearson, spearman))    
+
+def perform_pairwise_correlations(analysis_labels, analyzed_records, output_file_prefix):
+    """Compute and output Pearson and Spearman correlations between all pairs
+    of analyzed hits. Various data points per feature are considered for
+    correlation from within the dataset (hits, reads, etc.).
+    
+    Parameters
+    ----------
+    analysis_labels : list of strings
+        The dataset labels.
+    analyzed_records : list of lists
+        A list of the datasets, each dataset a list of records.
+    output_file_prefix : str
+        The prefix of the output files.
+    """
+    
+    zipped_input = sorted(zip(analysis_labels, analyzed_records))
+    
+    corr_data_sources = ("hits_linear", "hits_log", "reads_linear", "reads_log", "ni_linear", "ni_log")
+    corr_types = ("spearman", "pearson")
+    
+    # Prepare the data to correlated, assume all analyzed records contain the
+    # same records.
+    corr_data = {corr_data_source: {} for corr_data_source in corr_data_sources}
+    for label, records in zipped_input:
+        records.sort(key=lambda r: r["feature"].name)
+        corr_data["hits_linear"][label] = [r["hits"] for r in records]
+        corr_data["reads_linear"][label] = [r["reads"] for r in records]
+        corr_data["ni_linear"][label] = [r["neighborhood_index"] for r in records]
+        corr_data["hits_log"][label] = [math.log(v) if v > 0 else 0 for v in corr_data["hits_linear"][label]]
+        corr_data["reads_log"][label] = [math.log(v) if v > 0 else 0 for v in corr_data["reads_linear"][label]]
+        corr_data["ni_log"][label] = [math.log(v) if v > 0 else 0 for v in corr_data["ni_linear"][label]]
+        
+    # Perform the comparisons:
+    corr_results = {corr_data_source: {corr_type: {} for corr_type in corr_types}
+                    for corr_data_source in corr_data_sources}
+    for (label1, records1), (label2, records2) in itertools.combinations(zipped_input, 2):
+        for corr_data_source in corr_data_sources:
+            corr_results[corr_data_source]["pearson"][(label1, label2)] = \
+                scipy.stats.pearsonr(corr_data[corr_data_source][label1],
+                                     corr_data[corr_data_source][label2])
+            corr_results[corr_data_source]["spearman"][(label1, label2)] = \
+                scipy.stats.spearmanr(corr_data[corr_data_source][label1],
+                                      corr_data[corr_data_source][label2])
+    
+    # Write out everything:
+    ordered_labels = [p[0] for p in zipped_input]
+    for corr_data_source, corr_type in itertools.product(corr_data_sources, corr_types):
+        with open(output_file_prefix + ".%s.%s.csv" % (corr_data_source, corr_type), 'w') as out_file:
+            writer = csv.writer(out_file)
+            writer.writerow([""] + ordered_labels)
+            results = corr_results[corr_data_source][corr_type]
+            for ix, row_label in enumerate(ordered_labels[:-1]):
+                # NB: not writing out p-values, as most of them are > 0.001,
+                # and it's easier to read without them. However, BEWARE! Not
+                # all of them are so small!
+                writer.writerow([row_label] +
+                                ["%.3f" % results[(col_label, row_label)][0] for col_label in ordered_labels[:ix]] +
+                                [""] +
+                                ["%.3f" % results[(row_label, col_label)][0] for col_label in ordered_labels[ix+1:]])        
 
 def draw_histogram_of_analysis(dataset, output_file_prefix):
     # These parameters should perhaps be refactored to be part of the function
