@@ -68,15 +68,17 @@ def read_hit_file(filename, read_depth_filter=1):
                 
                 obj = {"chrom": chrom,
                        "source": source,
-                       "up_feature_type": up_feature_type,
-                       "up_feature_name": up_feature_name,
-                       "up_gene_name": up_gene_name,
-                       "up_feature_dist": up_feature_dist,
-                       "down_feature_type": down_feature_type,
-                       "down_feature_name": down_feature_name,
-                       "down_gene_name": down_gene_name,
-                       "down_feature_dist": down_feature_dist,
-                       "ig_type": ig_type,
+                       # NB: these fields are not used, but take up a lot of
+                       # space. Ignore them for now.
+#                        "up_feature_type": up_feature_type,
+#                        "up_feature_name": up_feature_name,
+#                        "up_gene_name": up_gene_name,
+#                        "up_feature_dist": up_feature_dist,
+#                        "down_feature_type": down_feature_type,
+#                        "down_feature_name": down_feature_name,
+#                        "down_gene_name": down_gene_name,
+#                        "down_feature_dist": down_feature_dist,
+#                        "ig_type": ig_type,
                        "hit_pos": int(hit_pos),
                        "hit_count": hit_count,
                        "gene_name": gene_name}
