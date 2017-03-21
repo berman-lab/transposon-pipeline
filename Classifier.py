@@ -316,7 +316,7 @@ def classify_albicans(pre_prediction_hits, post_prediction_hits, train_hits, tra
     
     # TODO: ignore features with no hits in neighborhood!
     coverages = SummaryTable.get_alb_coverage()
-    min_coverage = 0.8 # Min coverage required to be factored into the analysis
+    min_coverage = 0.95 # Min coverage required to be factored into the analysis
     # Use all names because we sometimes use the standard name and sometimes the CGDID:
     ignored_genes = set.union(*[f.all_names for f in alb_db.get_all_features() if coverages.get(f.standard_name, 1) < min_coverage])
     
