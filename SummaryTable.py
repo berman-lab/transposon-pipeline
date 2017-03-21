@@ -1026,7 +1026,7 @@ def make_read_map(hits, bin_size):
     
     return result
 
-def transform_read_map_to_log(read_map, base):
+def transform_chrom_map_with_log(read_map, base):
     for data in read_map.values():
         for ix in range(len(data)):
             data[ix] = math.log(data[ix], base) if data[ix] > 0 else 0
@@ -1053,20 +1053,74 @@ if __name__ == "__main__":
     
     all_analyzed = [analyze_hits(dataset, alb_db, 10000) for dataset in all_hits]
     
+    # Write nominal hit-per-ORF table (one table for all datasets):
+    with open(os.path.join(output_dir, "hit_summary.RDF_%d.csv" % read_depth_filter), 'w') as out_file:
+        writer = csv.writer(out_file)
+        writer.writerow(["Standard name", "Common name"] + [f[-2:] for f in input_filenames])
+        for record_row in zip(*[ds.values() for ds in all_analyzed]):
+            assert len(set(r["feature"].standard_name for r in record_row)) == 1
+            feature = record_row[0]["feature"]
+            writer.writerow([feature.standard_name, feature.common_name] +
+                            [r["hits"] for r in record_row])
+    
+    # Write a table of reads-per-hit for each dataset:
+    for fname, hits in zip(input_filenames, all_hits):
+        # Transform:
+        sum_hits = {chrom.name: {} for chrom in alb_db}
+        for h in hits:
+            sum_hits[h["chrom"]][h["hit_pos"]] = sum_hits[h["chrom"]].get(h["hit_pos"], 0) + h["hit_count"] 
+            
+        # Write out:
+        with open(os.path.join(output_dir, "all_hits.%s.csv" % fname), 'w') as out_file:
+            writer = csv.writer(out_file)
+            writer.writerow(["Chromosome", "Position", "Reads"])
+            for chrom, data in sorted(sum_hits.items()):
+                for pos, reads in sorted(data.items()):
+                    writer.writerow([chrom, pos, reads])
+    
+    # Plot the read distributions per hit:
+    for fname, hits in zip(input_filenames, all_hits):
+        plt.hist([math.log(h["hit_count"]) for h in hits], bins=100, range=(0,10))
+        plt.title("Read distribution per hit in %s" % fname)
+        plt.xlabel("log10 of # of reads per hit")
+        plt.ylabel("# of hits")
+        plt.savefig(os.path.join(output_dir, "reads_distribution.hits.log10.%s.rdf_%d.png" % (fname, read_depth_filter)))
+        plt.close()
+    
+    # Plot the read distributions per gene:
+    for fname, analysis in zip(input_filenames, all_analyzed):
+        plt.hist([math.log(r["reads"] + 1, 10) if r["reads"] > 0 else -0.1 for r in analysis.values()],
+                 bins=[-0.1] + [i/10.0 for i in range(61)])
+        plt.title("Read distribution per feature in %s" % fname)
+        plt.xlabel("log10 of # of reads per feature")
+        plt.ylabel("# of features")
+        plt.savefig(os.path.join(output_dir, "reads_distribution.log10.%s.rdf_%d.png" % (fname, read_depth_filter)))
+        plt.close()
+    
+    # Plot the hit and read chromosomal maps:
     bin_size = 10000
     for fname, hits in zip(input_filenames, all_hits):
         hit_map = make_hit_map(hits, bin_size)
         read_map = make_read_map(hits, bin_size)
         # NB: using a different log base doesn't affect the final figure much,
         # as the relationships between the values stay the same no matter what
-        # base is used. 
-        log_read_map = transform_read_map_to_log(make_read_map(hits, bin_size), 10)
-        draw_chrom_map(hit_map, bin_size, "Hits/10000 bps", 500, os.path.join(output_dir, "hit_map.%s.png" % fname))
+        # base is used. Only the axis labels change.
+        log_read_map = transform_chrom_map_with_log(make_read_map(hits, bin_size), 10)
+           
+        all_hits_sorted = sorted(sum(hit_map.values(), []))
+        max_hits = int( round(max(all_hits_sorted), -2) + 100 )
+        bottom_cut = int( round(all_hits_sorted[int(len(all_hits_sorted) * 0.5)], -2) + 100 )
+        bottom_cut = min(map(max, hit_map.values())) / 100 * 100 + 100
+        draw_chrom_map(hit_map, bin_size, "Hits/10000 bps", bottom_cut, os.path.join(output_dir, "hit_map.%s.png" % fname))
+          
         draw_chrom_map(log_read_map, bin_size, "Log10 reads/10000 bps", 7, os.path.join(output_dir, "log10_read_map.%s.png" % fname))
         draw_chrom_map(read_map, bin_size, "Reads/10000 bps", 100000, os.path.join(output_dir, "read_map.%s.png" % fname))
     
-    # Deep summary:
-    all_analyzed = [analyze_hits(dataset, alb_db, 10000) for dataset in all_hits]
+    # More correlations than you can shake a stick at:
+    perform_pairwise_correlations(input_filenames,
+                                  [a.values() for a in all_analyzed],
+                                  os.path.join(output_dir, "correlations"))
+    
     for fname, analysis in zip(input_filenames, all_analyzed):
         write_analyzed_alb_records(analysis.values(), os.path.join(output_dir, fname + "_analysis.csv"))
         draw_histogram_of_analysis(analysis, os.path.join(output_dir, fname))
