@@ -818,6 +818,8 @@ def _take_ixes(seq, ixes):
 
 
 if __name__ == "__main__":
+    output_folder = os.path.join(Shared.get_script_dir(), "output")
+    
     all_track_files = glob.glob(os.path.join(Shared.get_script_dir(), "dependencies", "Kornmann", "*.bed"))
     all_track_filenames = [os.path.split(file_path)[-1][:-4] for file_path in all_track_files]
     
@@ -835,28 +837,26 @@ if __name__ == "__main__":
     
     wt2_hits = all_tracks[all_track_filenames.index("Wild Type 2")]
     
-    output_folder = os.path.join(Shared.get_script_dir(), "output")
-    
     # Test training from cache:
     wt2_analyzed = SummaryTable.analyze_hits(wt2_hits, cer_db, 10000).values()
     wild_type_2_base_records = list( filter_cer_training_data(wt2_analyzed) )
     test_training_data(wild_type_2_base_records,
                        CER_ESSENTIALS,
-                       os.path.join(output_folder, "classifiers/Wild Type 2"))
+                       os.path.join(output_folder, "predictions/training/Wild Type 2"))
 
-    pre_hits = SummaryTable.read_hit_files(_get_sorted_hit_files(Shared.get_dependency("albicans/pre hit data")))
-    post_hits = SummaryTable.read_hit_files(_get_sorted_hit_files(Shared.get_dependency("albicans/post hit data")))
+    pre_hits = SummaryTable.read_hit_files(_get_sorted_hit_files(Shared.get_dependency("albicans/experiment data/pre evo/q20m2")))
+    post_hits = SummaryTable.read_hit_files(_get_sorted_hit_files(Shared.get_dependency("albicans/experiment data/post evo/q20m2")))
 
 
     classify_albicans(_concat_lists(_take_ixes(pre_hits, (3-1, 7-1, 11-1))),
-                      _concat_lists(_take_ixes(post_hits, (7-1, 9-1, 10-1))),
+                      _concat_lists(_take_ixes(post_hits, (3-1, 7-1, 11-1))),
                       wt2_hits,
                       CER_ESSENTIALS,
                       os.path.join(output_folder, "predictions/high cov - wt2 - fpr 0.075"),
                       target_fpr=0.075)
      
     classify_albicans(_concat_lists(_take_ixes(pre_hits, (3-1, 7-1, 11-1))),
-                      _concat_lists(_take_ixes(post_hits, (7-1, 9-1, 10-1))),
+                      _concat_lists(_take_ixes(post_hits, (3-1, 7-1, 11-1))),
                       wt2_hits,
                       CER_ESSENTIALS,
                       os.path.join(output_folder, "predictions/high cov - wt2 - fpr 0.05"),
