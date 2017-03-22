@@ -291,7 +291,9 @@ def get_youden_statistic(thresholds, tpr, fpr):
     # TODO: refactor in to the standard fpr/trp/threshold order.
     return max(zip(thresholds, tpr, fpr), key=lambda (th, t, f): t-f)
 
-def classify_albicans(pre_prediction_hits, post_prediction_hits, train_hits, train_essentials, output_folder, target_fpr=0.075):
+def classify_albicans(pre_prediction_hits, post_prediction_hits, train_hits,
+                      train_essentials, output_folder, target_fpr=0.075,
+                      run_go=False):
     """Classify albicans data.
     
     Parameters
@@ -309,6 +311,8 @@ def classify_albicans(pre_prediction_hits, post_prediction_hits, train_hits, tra
         The output folder which all results will be saved to.
     target_fpr : float
         The FPR which to choose when calling essentiality.
+    run_go : bool
+        A flag for running the GO analysis (can take some time).
     """
     
     # For convenience, if the output folder doesn't exist, create it:
@@ -560,27 +564,34 @@ def classify_albicans(pre_prediction_hits, post_prediction_hits, train_hits, tra
         },
     ]
     
-    # TODO: do we really have to use CGDID? Why can't use the standard name?
-    # Initialize the GO-related data:
-    obodag = goatools.obo_parser.GODag(Shared.get_dependency("albicans/go-basic.obo"))
-    gene2go = goatools.associations.read_associations(Shared.get_dependency("albicans/gene2go.txt"))
-    bg_orfs = set(f.primary_cgdid for f in alb_db.get_all_features() if f.is_orf and f.primary_cgdid not in ignored_genes)
-    # GO analysis requires a set of background genes. It may make sense to
-    # test against different backgrounds. This analysis object is constructed
-    # with a background of all tested albicans ORFs.
-    goeaobj_vs_all = goatools.go_enrichment.GOEnrichmentStudy(
-        bg_orfs,
-        gene2go, # geneid/GO associations
-        obodag, # Ontologies
-        propagate_counts = False,
-        alpha = 0.05, # default significance cut-off
-        methods = ['fdr_bh'] # defult multipletest correction method
-    )
+    # TODO: the run_go flag needs to be refactored.  
+    if run_go:
+        # TODO: do we really have to use CGDID? Why can't use the standard name?
+        # Initialize the GO-related data:
+        obodag = goatools.obo_parser.GODag(Shared.get_dependency("albicans/go-basic.obo"))
+        gene2go = goatools.associations.read_associations(Shared.get_dependency("albicans/gene2go.txt"))
+        bg_orfs = set(f.primary_cgdid for f in alb_db.get_all_features() if f.is_orf and f.primary_cgdid not in ignored_genes)
+        # GO analysis requires a set of background genes. It may make sense to
+        # test against different backgrounds. This analysis object is constructed
+        # with a background of all tested albicans ORFs.
+        goeaobj_vs_all = goatools.go_enrichment.GOEnrichmentStudy(
+            bg_orfs,
+            gene2go, # geneid/GO associations
+            obodag, # Ontologies
+            propagate_counts = False,
+            alpha = 0.05, # default significance cut-off
+            methods = ['fdr_bh'] # defult multipletest correction method
+        )
+    else:
+        goeaobj_vs_all = None
     
     def run_go_on_gene_list(gene_list, goeaobj, filename):
         cgdid_list = [alb_db.get_feature_by_name(f).primary_cgdid for f in gene_list]
         with open(os.path.join(output_folder, filename), 'w') as out_file:
             out_file.write("\n".join(cgdid_list))
+        
+        if not run_go:
+            return
         
         base_filename = os.path.join(output_folder, os.path.splitext(filename)[0])
         goea_results = [r for r in goeaobj.run_study(cgdid_list) if r.p_fdr_bh < 0.05]
@@ -609,16 +620,19 @@ def classify_albicans(pre_prediction_hits, post_prediction_hits, train_hits, tra
 
         ortholog_intersection = cer_orthologs & pom_orthologs
         
-        # A GO analysis object that considers the background to be all genes
-        # with orthologs in cerevisiae and pombe:
-        goeaobj_vs_orthologs = goatools.go_enrichment.GOEnrichmentStudy(
-            set(f.primary_cgdid for f in [alb_db.get_feature_by_name(fn) for fn in ortholog_intersection]),
-            gene2go, # geneid/GO associations
-            obodag, # Ontologies
-            propagate_counts = False,
-            alpha = 0.05, # default significance cut-off
-            methods = ['fdr_bh'] # defult multipletest correction method
-        )
+        if run_go:
+            # A GO analysis object that considers the background to be all genes
+            # with orthologs in cerevisiae and pombe:
+            goeaobj_vs_orthologs = goatools.go_enrichment.GOEnrichmentStudy(
+                set(f.primary_cgdid for f in [alb_db.get_feature_by_name(fn) for fn in ortholog_intersection]),
+                gene2go, # geneid/GO associations
+                obodag, # Ontologies
+                propagate_counts = False,
+                alpha = 0.05, # default significance cut-off
+                methods = ['fdr_bh'] # defult multipletest correction method
+            )
+        else:
+            goeaobj_vs_orthologs = None
         
         draw_venn("Orthologs",
                   os.path.join(output_folder, "orthologs_%d.png" % read_depth_filter),
@@ -639,20 +653,36 @@ def classify_albicans(pre_prediction_hits, post_prediction_hits, train_hits, tra
                 alb_classifier_essentials = set(r["feature"].standard_name for r in alb_essential_records)
                 alb_classifier_non_essentials = alb_orfs - alb_classifier_essentials
                 
+                # Write a comparison table vs. GRACE:
+                with open(os.path.join(output_folder, "predicted_vs_grace.csv"), 'w') as out_file:
+                    writer = csv.writer(out_file)
+                    writer.writerow(["", "GRACE ess.", "GRACE non ess.", "Total"])
+                    writer.writerow(["Predicted ess.",
+                                     len(alb_classifier_essentials & alb_omeara_essentials),
+                                     len(alb_classifier_essentials & alb_omeara_non_essentials),
+                                     len(alb_classifier_essentials)])
+                    writer.writerow(["Predicted non ess.",
+                                     len(alb_classifier_non_essentials & alb_omeara_essentials),
+                                     len(alb_classifier_non_essentials & alb_omeara_non_essentials),
+                                     len(alb_classifier_non_essentials)])
+                    writer.writerow(["Total",
+                                     len(alb_omeara_essentials),
+                                     len(alb_omeara_non_essentials)])
+                
+                draw_venn("Essentials (pred. vs. O'Meara) - %s, %s, %.2f, %d" % (classifier_type, group_name, threshold, read_depth_filter),
+                          os.path.join(output_folder, "pred_vs_omeara_essentials_%s_%s_%.2f_%d.png" % (classifier_type, group_name, threshold, read_depth_filter)),
+                          [alb_classifier_essentials & alb_omeara_orfs, alb_omeara_essentials],
+                          ("Predicted", "O'Meara essentials"))
+                
+                draw_venn("Non-essentials (pred. vs. O'Meara) - %s, %s, %.2f, %d" % (classifier_type, group_name, threshold, read_depth_filter),
+                          os.path.join(output_folder, "pred_vs_omeara_non_essentials_%s_%s_%.2f_%d.png" % (classifier_type, group_name, threshold, read_depth_filter)),
+                          [alb_classifier_non_essentials & alb_omeara_orfs, alb_omeara_non_essentials],
+                          ("Predicted non-essentials", "O'Meara non-essentials"))
+                
                 draw_venn("Essentials (pred. vs. lit.) - %s, %s, %.2f, %d" % (classifier_type, group_name, threshold, read_depth_filter),
                           os.path.join(output_folder, "pred_vs_lit_essentials_%s_%s_%.2f_%d.png" % (classifier_type, group_name, threshold, read_depth_filter)),
                           [alb_classifier_essentials, alb_literature_essentials],
                           ("Predicted", "Literature"))
-                
-                draw_venn("Essentials (pred. vs. O'Meara) - %s, %s, %.2f, %d" % (classifier_type, group_name, threshold, read_depth_filter),
-                          os.path.join(output_folder, "pred_vs_grace_essentials_%s_%s_%.2f_%d.png" % (classifier_type, group_name, threshold, read_depth_filter)),
-                          [alb_classifier_essentials & alb_omeara_orfs, alb_omeara_essentials],
-                          ("Predicted", "O'Meara essentials"))
-                
-                draw_venn("Essentials (pred. vs. O'Meara non-ess.) - %s, %s, %.2f, %d" % (classifier_type, group_name, threshold, read_depth_filter),
-                          os.path.join(output_folder, "pred_vs_grace_non_essentials_%s_%s_%.2f_%d.png" % (classifier_type, group_name, threshold, read_depth_filter)),
-                          [alb_classifier_non_essentials & alb_omeara_orfs, alb_omeara_non_essentials],
-                          ("Predicted non-essentials", "GRACE non-essentials"))
                 
                 draw_venn("Essentials (pred. vs. lit. non-ess.) - %s, %s, %.2f, %d" % (classifier_type, group_name, threshold, read_depth_filter),
                           os.path.join(output_folder, "pred_vs_lit_non_essentials_%s_%s_%.2f_%d.png" % (classifier_type, group_name, threshold, read_depth_filter)),
@@ -660,6 +690,13 @@ def classify_albicans(pre_prediction_hits, post_prediction_hits, train_hits, tra
                           ("Predicted non-essentials", "Literature non-essentials"))
                 
                 alb_essentials_with_orthologs = alb_classifier_essentials & ortholog_intersection
+                
+                draw_venn("Non-essentials (orthologs) - %s, %s, %.2f, %d" % (classifier_type, group_name, threshold, read_depth_filter),
+                          os.path.join(output_folder, "non_essentials_orthologs_%s_%s_%.2f_%d.png" % (classifier_type, group_name, threshold, read_depth_filter)),
+                          [alb_classifier_non_essentials & ortholog_intersection,
+                           cer_orthologs - cer_essentials,
+                           pom_orthologs - pom_essentials],
+                          ("Calb", "Sc", "Sp"))
                 
                 draw_venn("Essentials (orthologs) - %s, %s, %.2f, %d" % (classifier_type, group_name, threshold, read_depth_filter),
                           os.path.join(output_folder, "essentials_orthologs_%s_%s_%.2f_%d.png" % (classifier_type, group_name, threshold, read_depth_filter)),
