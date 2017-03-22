@@ -265,6 +265,14 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
             upstream_50_hits = upstream_region_50.sum()
             upstream_100_hits = upstream_region_100.sum()
             
+            # TODO: in Kornmann's paper, they a more permissive free region,
+            # which allowed for 1-2 (presumably) erroneous insertions in the
+            # middle of the region. Should be accounted for. 
+            if max_free_region < 300 or hits_in_feature_count < 20:
+                kornmann_domain_index = 0
+            else:
+                kornmann_domain_index = (max_free_region * hits_in_feature_count) / (len(feature) ** 1.5)
+            
             records[feature.standard_name] = {
                 "feature": feature,
                 "length": len(feature),
@@ -282,6 +290,7 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
                 "s_value": log2(reads_in_feature + 1) - total_reads_log, # Add 1 so as to not get a log 0
                 # Note: the positions are relative to the genome, NOT the gene:
                 "hit_locations": [ix+1 for (ix, hit) in enumerate(hits_in_feature) if hit > 0],
+                "kornmann_domain_index": kornmann_domain_index
             }
             
         result.update(records)
@@ -386,6 +395,12 @@ def write_analyzed_alb_records(records, output_file):
         {
             "field_name": "freedom_index",
             "csv_name": "Freedom index",
+            "format": "%.3f"
+        },
+        
+        {
+            "field_name": "kornmann_domain_index",
+            "csv_name": "Kornmann DI",
             "format": "%.3f"
         },
         
