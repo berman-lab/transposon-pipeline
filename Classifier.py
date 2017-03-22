@@ -1,4 +1,4 @@
-from GeneFeatures import cer_db, alb_db
+from GenomicFeatures import cer_db, alb_db
 import SummaryTable
 import glob
 import os

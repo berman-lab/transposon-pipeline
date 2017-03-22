@@ -1,7 +1,7 @@
 import os
 import csv
-import GeneFeatures
-from GeneFeatures import cer_db, alb_db
+import GenomicFeatures
+from GenomicFeatures import cer_db, alb_db
 import argparse
 import glob
 import scipy.stats
@@ -158,7 +158,7 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
     dataset : list of dict
         The hit list, requires that each hit have a "hit_pos", "hit_count" and
         "gene_name" field.
-    feature_db : `GeneFeatures._FeatureDB`
+    feature_db : `GenomicFeatures._FeatureDB`
         The feature database to use.
     neighborhood_window_size : int
         The window size for computing the neighborhood index.
@@ -620,7 +620,7 @@ def enrich_alb_records(records):
     alb_pheno_essentials = set(alb_phenotype_table[alb_phenotype_table["Phenotype"] == "inviable"]["Feature Name"])
     alb_pheno_non_essentials  = set(alb_phenotype_table[alb_phenotype_table["Phenotype"] == "viable"]["Feature Name"])
     
-    alb_db = GeneFeatures.alb_db
+    alb_db = GenomicFeatures.alb_db
     alb_pheno_essential_features = set(f.standard_name for f in filter(None, (alb_db.get_feature_by_name(f) for f in alb_pheno_essentials)))
     alb_pheno_non_essential_features = set(f.standard_name for f in  filter(None, (alb_db.get_feature_by_name(f) for f in alb_pheno_non_essentials)))
     
@@ -710,7 +710,7 @@ def enrich_alb_records(records):
 def enrich_with_pombe(records):
     """Add pombe orthologs and essentiality annotations to albicans records."""
     
-    pombe_genes = GeneFeatures.get_pombe_genes()
+    pombe_genes = GenomicFeatures.get_pombe_genes()
     
     viability_table = pd.read_csv(Shared.get_dependency("pombe/FYPOviability.tsv"),
                                   header=None,
