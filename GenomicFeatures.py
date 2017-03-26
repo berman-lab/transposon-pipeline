@@ -19,7 +19,12 @@ All indices are 1-based.
 """
 
 import Shared
+import gffutils
+import os
 from Bio import SeqIO
+from RangeSet import RangeSet
+from SortedCollection import SortedCollection
+from operator import attrgetter
 
 class _FeatureDB(object):
     """The base class for genome feature databases.
@@ -65,11 +70,8 @@ class _FeatureDB(object):
             
             chrom_name = feature.chromosome
             if chrom_name not in self._chrom_features:
-                self._chrom_features[chrom_name] = []
-            self._chrom_features[chrom_name].append(feature)
-            
-        for features in self._chrom_features.values():
-            features.sort(key=lambda f: f.start)
+                self._chrom_features[chrom_name] = SortedCollection(key=attrgetter("start"))
+            self._chrom_features[chrom_name].insert(feature)
             
         # Longest feature lengths are required for getting features in ranges:
         self._max_feature_lengths = {}
@@ -128,27 +130,21 @@ class _FeatureDB(object):
         chrom = self._chrom_names[chrom]
         features = self._chrom_features[chrom]
         # The left border is the furthest point at which we can find features
-        # overlapping with the required range, which can deduce as we know the
+        # overlapping with the required range, which we can deduce as we know
         # what the length of the longest feature is.
         left_border = start - self._max_feature_lengths[chrom]
         
-        last_feature_ix = _binary_search(features, stop, lambda f: f.start)
-        first_feature_ix = last_feature_ix - 1
+        try:
+            first_feature_ix = features.find_le(left_border)
+        except ValueError:
+            first_feature_ix = 0
         
         result = []
         
-        # Walk left:
-        while first_feature_ix >= 0:
-            f = features[first_feature_ix]
-            if f.start < left_border:
-                break
-            if f.start <= stop and f.stop >= start:
-                result.append(f)
-            first_feature_ix -= 1
-            
         # Walk right:
-        while last_feature_ix < len(features):
-            f = features[last_feature_ix]
+        walk_ix = first_feature_ix
+        while walk_ix < len(features):
+            f = features[walk_ix]
             if f.start > stop:
                 # Because the features are sorted by their .start attribute,
                 # once we find a feature that starts after the requested range
@@ -157,9 +153,7 @@ class _FeatureDB(object):
                 break
             if f.start <= stop and f.stop >= start:
                 result.append(f)
-            last_feature_ix += 1
-            
-        result.sort(key=lambda f: f.start)
+            walk_ix += 1
         
         return result
 
@@ -186,7 +180,7 @@ class _FeatureDB(object):
         
         Returns
         -------
-        DisjointRange
+        RangeSet
             A special object that simplifies working with a union of disjoint intervals.
         """
         
@@ -194,34 +188,8 @@ class _FeatureDB(object):
         start = max(start, 1)
         stop = min(len(chrom), stop)
         features = chrom[start:stop]
-        if len(features) == 0:
-            return DisjointRange([(start, stop)])
         
-        # First, compute the union of intervals of all features within the
-        # given region. This is necessary because features can overlap. 
-        joined_range = [[features[0].start, features[0].stop]]
-        for f in features[1:]:
-            _last_start, last_stop = last_range = joined_range[-1]
-            # We know that f.start >= last_start.
-            if f.start > last_stop + 1:
-                # We need to add a new range
-                joined_range.append([f.start, f.stop])
-            elif f.stop > last_stop:
-                # We only extend the previous one
-                last_range[1] = f.stop
-
-        # Get the inverse of the features:
-        inverse_range = []
-        if start < joined_range[0][0]:
-            inverse_range.append((start, joined_range[0][0]-1))
-        for i in range(len(joined_range)-1):
-            current_stop, next_start = joined_range[i][1], joined_range[i+1][0]
-            assert next_start - current_stop > 1
-            inverse_range.append((current_stop+1, next_start-1))
-        if stop > joined_range[-1][1]:
-            inverse_range.append((joined_range[-1][1]+1, stop))
-
-        return DisjointRange(inverse_range)
+        return RangeSet([(f.start, f.stop) for f in features]).complement(start, stop)
 
     def _create_chrom_cache(self, fasta_file=None):
         self._cached_chroms = {}
@@ -247,7 +215,16 @@ class _FeatureDB(object):
 class AlbicansFeatureDB(_FeatureDB):
     A21, A22 = (21, 22)
     
-    def __init__(self, feature_filename, fasta_file=None):
+    def __init__(self, feature_filename, fasta_file=None, gff_filename=None):
+        if gff_filename is not None:
+            gff_db_filename = gff_filename + ".gffutils_db.sqlite"
+            if not os.path.exists(gff_db_filename):
+                gff_db = gffutils.create_db(gff_filename, gff_db_filename, merge_strategy="create_unique")
+            else:
+                gff_db = gffutils.FeatureDB(gff_db_filename, keep_order=True)
+        else:
+            gff_db = None
+        
         features = []
         with open(feature_filename, "r") as in_file:
             for line in in_file:
@@ -267,6 +244,19 @@ class AlbicansFeatureDB(_FeatureDB):
                     feature.start == -1): # Unmapped features aren't useful
                     continue
                 
+                if gff_db is not None:
+                    exons = []
+                    try:
+                        gff_feature = gff_db[feature.standard_name]
+                        assert feature.start == gff_feature.start and  feature.stop == gff_feature.end
+                        
+                        for exon in gff_db.children(gff_feature, featuretype="exon"):
+                            exons.append((exon.start, exon.end))
+                    except gffutils.exceptions.FeatureNotFoundError:
+                        pass
+                    
+                    feature._set_exons(exons)
+                    
                 features.append(feature)
                 
         super(AlbicansFeatureDB, self).__init__(features, fasta_file)
@@ -285,9 +275,17 @@ class AlbicansFeatureDB(_FeatureDB):
 class CerevisiaeFeatureDB(_FeatureDB):
     def __init__(self, feature_filename, fasta_file=None):
         features = []
+        introns = {}
         with open(feature_filename, 'r') as in_file:
             for line in in_file:
                 feature = CerevisiaeFeature(line)
+                
+                if feature.type == "intron":
+                    parent = feature.parent_feature
+                    if parent not in introns:
+                        introns[parent] = []
+                    introns[parent].append(feature)
+                    continue
                 
                 if (feature.type in ("telomere", "ARS") or # Ignore unwanted feature types
                     feature.chromosome == '17' or # Ignore mitochondria
@@ -296,7 +294,18 @@ class CerevisiaeFeatureDB(_FeatureDB):
                     continue
                 
                 features.append(feature)
-                
+        
+        # Go over all features and look up their introns:
+        for feature in features:
+            introns_for_feature = []
+            for alias in feature.all_names:
+                if alias in introns:
+                    introns_for_feature = introns[alias]
+                    break
+            
+            exons = RangeSet([(intron.start, intron.stop) for intron in introns_for_feature]).complement(feature.start, feature.stop)
+            feature._set_exons(exons)
+        
         super(CerevisiaeFeatureDB, self).__init__(features, fasta_file)
         
         self._chrom_names.update({"chrI" : "1", "chrII" : "2", "chrIII" : "3", "chrIV" : "4",
@@ -345,6 +354,12 @@ class _Feature(object):
         The 1-based leftmost position of the feature.
     stop : int
         The 1-based rightmost position of the feature.
+    exons : RangeSet
+        The exons of this feature. If the feature does not represent an ORF and
+        thus has no exons defined in the GFF, or if no GFF database is given,
+        the list of exons is just the feature itself.
+    coding_length : int
+        The sum of the lengths of all of the exons.
     """
     
     def __init__(self, components, primary_name_col, common_name_col,
@@ -373,6 +388,13 @@ class _Feature(object):
 
     def __len__(self):
         return self._len
+    
+    def _set_exons(self, exons=None):
+        if not exons:
+            exons = [(self.start, self.stop)]
+        self.exons = RangeSet(exons)
+        
+        self.coding_length = self.exons.coverage
 
 class AlbicansFeature(_Feature):
     def __init__(self, feature_line):
@@ -400,94 +422,6 @@ class CerevisiaeFeature(_Feature):
         self.all_names.add(self.feature_name)
         self.name = self.common_name or self.feature_name or self.standard_name
         self.feature_qualifier = components[3-1]
-
-# 
-# 
-def _binary_search(seq, query, key_func=lambda x: x):
-    """Ye olde binary search.
-    
-    Returns an index mid at which seq[mid] == query (not necessarily the first
-    one). If such an index doesn't exist, returns the first index at which
-    seq[mid] > query. If such an index doesn't exist, returns the last index of
-    seq.
-    
-    Parameters
-    ----------
-    seq : indexable sequence
-        The sequence to search.
-    query : object
-        The value to look for.
-    key_func : function
-        A key funciton, similar to the `key` argument in `sorted`, that will be
-        applied to each item in `seq` for comparison with `query`.
-    """
-    
-    # TODO: consider replacing with bisect. We can preserve the key_func
-    # functionality by having a class that wraps the sequence and calls
-    # the key_func in __getitem__.
-    
-    # Search boundaries:
-    low = 0
-    high = len(seq) - 1
-    while low < high:
-        mid = (low + high) / 2
-        cmp_result = cmp(key_func(seq[mid]), query)
-        if cmp_result == 0:
-            return mid
-        elif cmp_result < 0:
-            # seq[mid] < query
-            if low != mid:
-                low = mid
-            else:
-                low = mid + 1
-        else:
-            # query < seq[mid]
-            if high != mid:
-                high = mid
-            else:
-                high = mid - 1
-    return low
-
-
-class DisjointRange(object):
-    """A disjoint union of closed intervals.
-    
-    Used to represent inter-feature regions.
-    
-    Attributes
-    ----------
-    coverage : int
-        The sum of lengths of the intervals composing this object.
-    """
-    
-    def __init__(self, ranges):
-        """
-        Parameters
-        ----------
-        ranges : sequence of (int, int)
-            A sequence of closed intervals. Assumes they are already disjoint
-            and sorted.
-        """
-        
-        self._ranges = ranges
-        self.start = ranges[0][0]
-        self.stop = ranges[-1][1]
-        self.coverage = sum(r[1] - r[0] + 1 for r in ranges)
-
-    def __contains__(self, pos):
-        ix = _binary_search(self._ranges, pos, lambda r: r[0])
-        start, stop = self._ranges[ix]
-        if pos >= start and pos <= stop:
-            # Either pos is exactly equal to the start of an interval, or we
-            # overshot the range, but are still contained within the last
-            # interval.
-            return True
-        elif ix > 0 and pos <= self._ranges[ix-1][1]:
-            # We know that pos < self._ranges[ix][0], so the pos could be
-            # contained in the previous interval.
-            return True
-        
-        return False
 
 # A cache for the pombe genes, so we don't have to parse the file each time:
 _POMBE_GENES = None
@@ -520,4 +454,17 @@ def get_pombe_genes():
 # The default feature DBs, for convenience.
 cer_db = CerevisiaeFeatureDB(Shared.get_dependency("cerevisiae/SGD_features.tab"))
 alb_db = AlbicansFeatureDB(Shared.get_dependency("albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomal_feature.tab"),
-                           Shared.get_dependency("albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes.fasta"))
+                           Shared.get_dependency("albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes.fasta"),
+                           Shared.get_dependency("albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_features.gff"))
+
+if __name__ == "__main__":
+    # Some testing:
+    assert alb_db.get_features_at_range(1, (2000, 3000)) == []
+    assert len(alb_db.get_features_at_range(1, (4000, 4400))) == 1
+    assert alb_db.get_features_at_range(1, (4000, 4400))[0].standard_name == "C1_00010W_A"
+    assert list(alb_db.get_interfeature_range(1, (4100, 4700))) == [(4398, 4408)]
+    assert len(alb_db.get_features_at_range(1, (1, 10000))) == 3
+    
+    assert list(cer_db.get_feature_by_name("YAL001C").exons) == [(147594, 151006), (151097, 151166)]
+    assert cer_db.get_feature_by_name("YAL001C").coding_length ==  3483
+    

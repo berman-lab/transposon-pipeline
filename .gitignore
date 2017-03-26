@@ -4,6 +4,7 @@ dependencies/albicans/experiment data/
 
 # Don't upload any caches:
 dependencies/Kornmann/cached_sc_track_hits.dat
+*.gffutils_db.sqlite
 
 # Ignore the convenience output folder:
 output/
