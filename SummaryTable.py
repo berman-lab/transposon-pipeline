@@ -193,29 +193,36 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
         hits = [h for h in dataset if h["chrom"] == chrom]
         
         chrom_len = max(len(feature_db[chrom]), max(h["hit_pos"] for h in hits))
-        # For ease of analysis downstream, we separate the hits that fell within
-        # features from those that fell outside.
-        hits_in_features = np.zeros((chrom_len + 1,), dtype=np.int)
-        hits_outside_features = np.zeros((chrom_len + 1,), dtype=np.int)
+        
+        # We will count up all of the hits, and then separate them into intra-
+        # and inter-feature arrays (for the neighborhood index). The separation
+        # is done via using an exon mask:
+        exon_mask = np.zeros((chrom_len + 1,), dtype=np.bool)
+        for feature in feature_db[chrom]:
+            for exon in feature.exons:
+                exon_mask[exon[0]:exon[1]+1] = True
+        
+        hits_across_chrom = np.zeros((chrom_len + 1,), dtype=np.int)
         reads_across_chrom = np.zeros((chrom_len + 1,), dtype=np.int)
         
         for hit in hits:
             reads_across_chrom[hit["hit_pos"]] += hit["hit_count"]
             # TODO: why do we cap the hits at 2? What happens with pooled
             # hit all_hits?
-            if hit["gene_name"] == "nan":
-                if hits_outside_features[hit["hit_pos"]] < 2:
-                    hits_outside_features[hit["hit_pos"]] += 1 
-            else:
-                if hits_in_features[hit["hit_pos"]] < 2:
-                    hits_in_features[hit["hit_pos"]] += 1
+            hit_pos = hit["hit_pos"]
+            if hits_across_chrom[hit_pos] < 2:
+                hits_across_chrom[hit_pos] += 1
+
+        hits_in_features = hits_across_chrom * exon_mask
+        hits_outside_features = hits_across_chrom * np.invert(exon_mask)
         
         records = {} # The per-feature records for this chromosome.
 
         for feature in feature_db[chrom]:
-            hits_in_feature = hits_in_features[feature.start:feature.stop+1]
+            feature_mask = exon_mask[feature.start:feature.stop+1]
+            hits_in_feature = hits_in_features[feature.start:feature.stop+1][feature_mask]
             hits_in_feature_count = hits_in_feature.sum()
-            reads_in_feature = reads_across_chrom[feature.start:feature.stop+1].sum()
+            reads_in_feature = reads_across_chrom[feature.start:feature.stop+1][feature_mask].sum()
             
             # The borders of the neighborhood window:
             window_start = max(1, feature.start - neighborhood_window_size)
@@ -225,7 +232,7 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
             hits_outside_feature_count = hits_outside_feature.sum()
             
             intergenic_region = feature_db.get_interfeature_range(chrom, (window_start, window_end))
-            insertion_index = float(hits_in_feature_count) / len(feature)
+            insertion_index = float(hits_in_feature_count) / feature.coding_length
             
             # There are some scenarios where large regions have no hits whatsoever:
             #   * The dataset is very low coverage.
@@ -259,7 +266,7 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
             upstream_region_50 = hits_outside_features[upstream_slice_50]
             
             # Compute the longest area without any hits:
-            hit_ixes = [0] + list(np.where(hits_in_feature > 0)[0]+1) + [len(feature) + 1]
+            hit_ixes = [0] + list(np.where(hits_in_feature > 0)[0]+1) + [feature.coding_length + 1]
             max_free_region = max(right - left for left, right in zip(hit_ixes, hit_ixes[1:])) - 1
             
             upstream_50_hits = upstream_region_50.sum()
@@ -271,7 +278,7 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
             if max_free_region < 300 or hits_in_feature_count < 20:
                 kornmann_domain_index = 0
             else:
-                kornmann_domain_index = (max_free_region * hits_in_feature_count) / (len(feature) ** 1.5)
+                kornmann_domain_index = (max_free_region * hits_in_feature_count) / (feature.coding_length ** 1.5)
             
             records[feature.standard_name] = {
                 "feature": feature,
@@ -285,10 +292,10 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
                 "upstream_hits_50": upstream_50_hits,
                 "upstream_hits_100": upstream_100_hits,
                 "max_free_region": max_free_region,
-                "freedom_index": float(max_free_region) / len(feature),
+                "freedom_index": float(max_free_region) / feature.coding_length,
                 # The value is singular, to get the coefficient we subtract the pre from the post later on:
                 "s_value": log2(reads_in_feature + 1) - total_reads_log, # Add 1 so as to not get a log 0
-                # Note: the positions are relative to the genome, NOT the gene:
+                # Note: the positions are relative to the gene, and the introns are excised:
                 "hit_locations": [ix+1 for (ix, hit) in enumerate(hits_in_feature) if hit > 0],
                 "kornmann_domain_index": kornmann_domain_index
             }
@@ -1004,11 +1011,6 @@ def write_hits_into_bed(target_file, hits):
 
 def write_analyzed_hits_into_bed_proteome(target_file, records):
     """Write a given hit list into a BED-format file that represents protein.
-    
-    Note
-    ----
-    
-    This function ignores introns - genes with introns will not be displayed correctly!
     """
     
     with open(target_file, 'w') as bed_file:
@@ -1020,7 +1022,7 @@ def write_analyzed_hits_into_bed_proteome(target_file, records):
                 # As the hit locations are relative to the genome, that is the
                 # Watson strand, we have to reverse them if the feature is
                 # translated from the Crick strand. 
-                feature_len = len(feature) / 3
+                feature_len = feature.coding_length / 3
                 aa_hits = [feature_len - h + 1 for h in aa_hits]
             for aa_hit in aa_hits:
                 bed_file.write("%s\t%d\t%d\n" % (record["feature"].standard_name, aa_hit, aa_hit+1))
