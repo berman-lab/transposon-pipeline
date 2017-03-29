@@ -135,7 +135,7 @@ class _FeatureDB(object):
         left_border = start - self._max_feature_lengths[chrom]
         
         try:
-            first_feature_ix = features.find_le(left_border)
+            first_feature_ix = features.index(features.find_lt(left_border))
         except ValueError:
             first_feature_ix = 0
         
@@ -464,6 +464,8 @@ if __name__ == "__main__":
     assert alb_db.get_features_at_range(1, (4000, 4400))[0].standard_name == "C1_00010W_A"
     assert list(alb_db.get_interfeature_range(1, (4100, 4700))) == [(4398, 4408)]
     assert len(alb_db.get_features_at_range(1, (1, 10000))) == 3
+    assert len(alb_db.get_features_at_range(5, (1150249, 1152390))) == 3
+    assert [f.standard_name for f in alb_db.get_features_at_range(5, (1150249, 1152390))] == ["C5_05280C_A", "C5_05290C_A", "C5_05300W_A"]
     
     assert list(cer_db.get_feature_by_name("YAL001C").exons) == [(147594, 151006), (151097, 151166)]
     assert cer_db.get_feature_by_name("YAL001C").coding_length ==  3483
