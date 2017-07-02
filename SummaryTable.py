@@ -202,6 +202,11 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
         for feature in feature_db[chrom]:
             for exon in feature.exons:
                 exon_mask[exon[0]:exon[1]+1] = True
+                
+        domain_mask = np.zeros((chrom_len + 1,), dtype=np.bool)
+        for feature in feature_db[chrom]:
+            for domain in feature.domains:
+                domain_mask[domain[0]:domain[1]+1] = True
         
         hits_across_chrom = np.zeros((chrom_len + 1,), dtype=np.int)
         reads_across_chrom = np.zeros((chrom_len + 1,), dtype=np.int)
@@ -221,9 +226,12 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
 
         for feature in feature_db[chrom]:
             feature_mask = exon_mask[feature.start:feature.stop+1]
+            domain_feature_mask = domain_mask[feature.start:feature.stop+1]
             hits_in_feature = hits_in_features[feature.start:feature.stop+1][feature_mask]
+            hits_in_domains_count = hits_in_features[feature.start:feature.stop+1][domain_feature_mask].sum()
             hits_in_feature_count = hits_in_feature.sum()
             reads_in_feature = reads_across_chrom[feature.start:feature.stop+1][feature_mask].sum()
+            reads_in_domains = reads_across_chrom[feature.start:feature.stop+1][domain_feature_mask].sum()
             
             # The borders of the neighborhood window:
             window_start = max(1, feature.start - neighborhood_window_size)
@@ -298,7 +306,11 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
                 "s_value": log2(reads_in_feature + 1) - total_reads_log, # Add 1 so as to not get a log 0
                 # Note: the positions are relative to the gene, and the introns are excised:
                 "hit_locations": [ix+1 for (ix, hit) in enumerate(hits_in_feature) if hit > 0],
-                "kornmann_domain_index": kornmann_domain_index
+                "kornmann_domain_index": kornmann_domain_index,
+                "domain_ratio": float(feature.domains.coverage) / feature.coding_length,
+                "hits_in_domains": hits_in_domains_count,
+                "reads_in_domains": reads_in_domains,
+                "domain_coverage": feature.domains.coverage,
             }
             
         result.update(records)

@@ -490,6 +490,12 @@ def classify_albicans(pre_prediction_hits, post_prediction_hits, train_hits,
             "csv_name": "Hits",
             "format": "%d"
         },
+        
+        {
+            "field_name": "reads",
+            "csv_name": "Reads",
+            "format": "%d"
+        },
                    
         {
             "field_name": "feature",
@@ -507,6 +513,12 @@ def classify_albicans(pre_prediction_hits, post_prediction_hits, train_hits,
             "field_name": "freedom_index",
             "csv_name": "Freedom index",
             "format": "%.2f"
+        },
+        
+        {
+            "field_name": "kornmann_domain_index",
+            "csv_name": "Kornmann DI",
+            "format": "%.3f"
         },
         
         {
@@ -536,6 +548,30 @@ def classify_albicans(pre_prediction_hits, post_prediction_hits, train_hits,
         {
             "field_name": "upstream_hits_100",
             "csv_name": "Upstream hits 100",
+            "format": "%d"
+        },
+        
+        {
+            "field_name": "domain_ratio",
+            "csv_name": "Domain ratio",
+            "format": "%.2f"
+        },
+        
+        {
+            "field_name": "domain_coverage",
+            "csv_name": "Domain coverage",
+            "format": "%d"
+        },
+        
+        {
+            "field_name": "hits_in_domains",
+            "csv_name": "Hits in domains",
+            "format": "%d"
+        },
+        
+        {
+            "field_name": "reads_in_domains",
+            "csv_name": "Reads in domains",
             "format": "%d"
         },
         
@@ -764,6 +800,33 @@ def classify_albicans(pre_prediction_hits, post_prediction_hits, train_hits,
                     writer.writerow([sk1] + [stats[sk1][sk2] for sk2 in stats_keys] + [total, "%.3f" % (stats[sk1][sk1] / float(total))])
                 writer.writerow(["Total"] + [sum(stats[sk1][sk2] for sk1 in stats_keys) for sk2 in stats_keys])
                 writer.writerow(["Agreement"] + [("%.3f" % (float(stats[sk2][sk2]) / sum(stats[sk1][sk2] for sk1 in stats_keys))) for sk2 in stats_keys])
+                
+    for rdf, (classifier_type, group_name) in itertools.product(rdfs, cls_keys):
+        with open(os.path.join(output_folder, "domain_analaysis.%s_%s.rdf_%d.csv" % (classifier_type, group_name, rdf)), 'w') as out_file:
+            writer = csv.writer(out_file)
+            verdict_key = "%s-%s-verdict" % (classifier_type, group_name)
+            names = {prediction: set(r["feature"].standard_name for r in post_analyzed_datasets[rdf]
+                                     if r["feature"].domains and r[verdict_key] == prediction)
+                     for prediction in stats_keys}
+            for label, dataset in (("Pre", pre_analyzed_datasets[rdf]), ("Post", post_analyzed_datasets[rdf])):
+                writer.writerow([label])
+                writer.writerow(["Type", "Count", "Total length", "Total domain length", "Domain ratio", "Total hits",
+                                 "Hits in domains", "Total reads", "Reads in domains", "% hits in domains",
+                                 "% reads in domains", "Bps/hit - overall", "Bps/hit - non-domains", "Bps/hit - domains"])
+                for prediction in stats_keys:
+                    records = [r for r in dataset if r["feature"].standard_name in names[prediction]]
+                    total_length = sum(r["feature"].coding_length for r in records)
+                    domain_length = sum(r["feature"].domains.coverage for r in records)
+                    hits = sum(r["hits"] for r in records)
+                    hits_in_domains = sum(r["hits_in_domains"] for r in records)
+                    reads = sum(r["reads"] for r in records)
+                    reads_in_domains = sum(r["reads_in_domains"] for r in records)
+                    
+                    writer.writerow([prediction, len(records), total_length, domain_length, "%.2f" % (float(domain_length)/total_length),
+                                     hits, hits_in_domains, reads, reads_in_domains, "%.2f" % (float(hits_in_domains) / hits),
+                                     "%.2f" % (float(reads_in_domains) / reads), "%d" % (total_length / hits),
+                                     "%d" % ((total_length - domain_length) / (hits - hits_in_domains)),
+                                     "%d" % (domain_length / hits_in_domains)])
 
 def draw_venn(title, output_file_path, data, labels):
     plt.figure(figsize=(8,8))
