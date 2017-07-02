@@ -1,7 +1,6 @@
 import os
 import csv
 import GenomicFeatures
-from GenomicFeatures import cer_db, alb_db
 import argparse
 import glob
 import scipy.stats
@@ -46,31 +45,31 @@ def read_hit_file(filename, read_depth_filter=1):
     result = []
     
     with open(filename, "r") as in_file:
-            in_file.next()
-            for line in in_file:
-                chrom, source, up_feature_type, up_feature_name, up_gene_name, \
-                       up_feature_dist, down_feature_type, down_feature_name, \
-                       down_gene_name, down_feature_dist, ig_type, \
-                       hit_pos, hit_count = line.split("\t")
-                
-                hit_count = int(hit_count)
-                if hit_count < read_depth_filter:
-                    continue       
-                
-                if "ORF" in ig_type:
-                    gene_name = up_gene_name if up_gene_name != "nan" \
-                            else up_feature_name
-                    assert ig_type in ("ORF(W)-ORF(W)", "ORF(C)-ORF(C)") and \
-                           up_feature_name == down_feature_name and \
-                           up_gene_name == down_gene_name and \
-                           up_feature_dist == down_feature_dist == "0"
-                else:
-                    gene_name = "nan"
-                
-                obj = {"chrom": chrom,
-                       "source": source,
-                       # NB: these fields are not used, but take up a lot of
-                       # space. Ignore them for now.
+        in_file.next()
+        for line in in_file:
+            chrom, source, up_feature_type, up_feature_name, up_gene_name, \
+                   up_feature_dist, down_feature_type, down_feature_name, \
+                   down_gene_name, down_feature_dist, ig_type, \
+                   hit_pos, hit_count = line.split("\t")
+            
+            hit_count = int(hit_count)
+            if hit_count < read_depth_filter:
+                continue       
+            
+            if "ORF" in ig_type:
+                gene_name = up_gene_name if up_gene_name != "nan" \
+                        else up_feature_name
+                assert ig_type in ("ORF(W)-ORF(W)", "ORF(C)-ORF(C)") and \
+                       up_feature_name == down_feature_name and \
+                       up_gene_name == down_gene_name and \
+                       up_feature_dist == down_feature_dist == "0"
+            else:
+                gene_name = "nan"
+            
+            obj = {"chrom": chrom,
+                   "source": source,
+                   # NB: these fields are not used, but take up a lot of
+                   # space. Ignore them for now.
 #                        "up_feature_type": up_feature_type,
 #                        "up_feature_name": up_feature_name,
 #                        "up_gene_name": up_gene_name,
@@ -80,11 +79,11 @@ def read_hit_file(filename, read_depth_filter=1):
 #                        "down_gene_name": down_gene_name,
 #                        "down_feature_dist": down_feature_dist,
 #                        "ig_type": ig_type,
-                       "hit_pos": int(hit_pos),
-                       "hit_count": hit_count,
-                       "gene_name": gene_name}
-                
-                result.append(obj)
+                   "hit_pos": int(hit_pos),
+                   "hit_count": hit_count,
+                   "gene_name": gene_name}
+            
+            result.append(obj)
                 
     return result
 
@@ -138,6 +137,8 @@ def get_statistics(dataset, feature_db):
             if f.is_orf:
                 result[ORF_HITS] += 1
                 break
+    
+    alb_db = GenomicFeatures.default_alb_db()
     
     result[INTERGENIC_HITS] = result[TOTAL_HITS] - result[ANNOTATED_FEATURE_HITS]
     result[FEATURES_HIT] = len(features_hit)
@@ -529,6 +530,8 @@ def get_cerevisiae_essentials():
         their standard names.
     """
     
+    cer_db = GenomicFeatures.default_cer_db()
+    
     viable_filepath = Shared.get_dependency("cerevisiae/cerevisiae_viable_annotations.txt")
     inviable_filepath = Shared.get_dependency("cerevisiae/cerevisiae_inviable_annotations.txt")
     
@@ -575,6 +578,8 @@ def enrich_alb_records(records):
     """Enrich albicans records with 3-rd party data.
     
     3-rd party data include orthologs, essentiality from literature, etc."""
+    
+    cer_db = GenomicFeatures.default_cer_db()
     
     # Pombe:
     enrich_with_pombe(records)
@@ -627,7 +632,7 @@ def enrich_alb_records(records):
     alb_pheno_essentials = set(alb_phenotype_table[alb_phenotype_table["Phenotype"] == "inviable"]["Feature Name"])
     alb_pheno_non_essentials  = set(alb_phenotype_table[alb_phenotype_table["Phenotype"] == "viable"]["Feature Name"])
     
-    alb_db = GenomicFeatures.alb_db
+    alb_db = GenomicFeatures.default_alb_db()
     alb_pheno_essential_features = set(f.standard_name for f in filter(None, (alb_db.get_feature_by_name(f) for f in alb_pheno_essentials)))
     alb_pheno_non_essential_features = set(f.standard_name for f in  filter(None, (alb_db.get_feature_by_name(f) for f in alb_pheno_non_essentials)))
     
@@ -635,57 +640,8 @@ def enrich_alb_records(records):
     alb_pheno_essential_consensus = alb_pheno_essential_features - alb_pheno_non_essential_features
     alb_pheno_non_essential_consensus = alb_pheno_non_essential_features - alb_pheno_essential_features
     
-    grace_table_path = Shared.get_dependency("albicans/ncomms7741-s2.xls")
-    grace_table = pd.read_excel(grace_table_path, sheetname=1, #"Essentiality scores",
-                                skiprows=14, header=None,
-                                names=["orf19 name", "Common", "Description", "Plate", "Position",
-                                       "tet growth", "5-FOA excision", "dox growth", "Essentiality Concordance  (Y/N)",
-                                       "Essential/Not essential", "S. cerevisiae homolog", "S. cerevisiae KO phenotype"])
-    
-    # GRACE:
-    
-    roemer_grace_essentials = set()
-    roemer_grace_non_essentials = set()
-    omeara_grace_essentials = set()
-    omeara_grace_non_essentials = set()
-    
-    # Couldn't figure out how to make pandas constrain types in a column, so we
-    # have to handle all sorts of weirdness, including nan, and make it as
-    # robust as possible.
-    def _extract_tet_growth(tet_growth):
-        str_tet_growth = str(tet_growth)
-        if "+" not in str_tet_growth:
-            return None
-        return float(str_tet_growth.replace("+", ""))
-    
-    def _extract_foa_excision(foa_excision):
-        if foa_excision not in ("Yes", "No"):
-            return None
-        return foa_excision
-        
-    for _ix, line in grace_table.iterrows():
-        orf19name = line["orf19 name"]
-        feature = alb_db.get_feature_by_name(orf19name)
-        if feature is None:
-            continue
-        
-        omeara_essential = line["Essential/Not essential"]
-        if omeara_essential == 'E':
-            omeara_grace_essentials.add(feature.standard_name)
-        elif omeara_essential == 'N':
-            omeara_grace_non_essentials.add(feature.standard_name) 
-        
-        tet_growth = _extract_tet_growth(line["tet growth"])
-        foa_excision = _extract_foa_excision(line["5-FOA excision"])
-        
-        
-        if tet_growth is None and foa_excision is None:
-            continue
-        
-        if (tet_growth >= 3) or foa_excision == "Yes":
-            roemer_grace_essentials.add(feature.standard_name)
-        else:
-            roemer_grace_non_essentials.add(feature.standard_name)
+    roemer_grace_essentials, roemer_grace_non_essentials, \
+        omeara_grace_essentials, omeara_grace_non_essentials = get_grace_essentials()
     
     unique_coverage = get_alb_coverage()
     
@@ -714,10 +670,78 @@ def enrich_alb_records(records):
         record["essential_in_albicans_grace_omeara"] = "Yes" if feature.standard_name in omeara_grace_essentials else \
             "No" if feature.standard_name in omeara_grace_non_essentials else ""
 
+@Shared.memoized
+def get_grace_essentials():
+    """Get names of essential and non-essential feature names in the GRACE
+    collection.
+    
+    Feature names are in the standard format.
+    
+    Returns
+    -------
+    tuple of sets of str : (roemer_essentials, roemer_non_essentials,
+                            omeara_essentials, omeara_non_essentials)
+    """
+    
+    grace_table_path = Shared.get_dependency("albicans/ncomms7741-s2.xls")
+    grace_table = pd.read_excel(grace_table_path, sheetname=1, #"Essentiality scores",
+                                skiprows=14, header=None,
+                                names=["orf19 name", "Common", "Description", "Plate", "Position",
+                                       "tet growth", "5-FOA excision", "dox growth", "Essentiality Concordance  (Y/N)",
+                                       "Essential/Not essential", "S. cerevisiae homolog", "S. cerevisiae KO phenotype"])
+    
+    roemer_grace_essentials = set()
+    roemer_grace_non_essentials = set()
+    omeara_grace_essentials = set()
+    omeara_grace_non_essentials = set()
+    
+    # Couldn't figure out how to make pandas constrain types in a column, so we
+    # have to handle all sorts of weirdness, including nan, and make it as
+    # robust as possible.
+    def _extract_tet_growth(tet_growth):
+        str_tet_growth = str(tet_growth)
+        if "+" not in str_tet_growth:
+            return None
+        return float(str_tet_growth.replace("+", ""))
+    
+    def _extract_foa_excision(foa_excision):
+        if foa_excision not in ("Yes", "No"):
+            return None
+        return foa_excision
+        
+    alb_db = GenomicFeatures.default_alb_db()
+    
+    for _ix, line in grace_table.iterrows():
+        orf19name = line["orf19 name"]
+        feature = alb_db.get_feature_by_name(orf19name)
+        if feature is None:
+            continue
+        
+        omeara_essential = line["Essential/Not essential"]
+        if omeara_essential == 'E':
+            omeara_grace_essentials.add(feature.standard_name)
+        elif omeara_essential == 'N':
+            omeara_grace_non_essentials.add(feature.standard_name) 
+        
+        tet_growth = _extract_tet_growth(line["tet growth"])
+        foa_excision = _extract_foa_excision(line["5-FOA excision"])
+        
+        
+        if tet_growth is None and foa_excision is None:
+            continue
+        
+        if (tet_growth >= 3) or foa_excision == "Yes":
+            roemer_grace_essentials.add(feature.standard_name)
+        else:
+            roemer_grace_non_essentials.add(feature.standard_name)
+            
+    return (roemer_grace_essentials, roemer_grace_non_essentials,
+            omeara_grace_essentials, omeara_grace_non_essentials)
+
 def enrich_with_pombe(records):
     """Add pombe orthologs and essentiality annotations to albicans records."""
     
-    pombe_genes = GenomicFeatures.get_pombe_genes()
+    pom_db = GenomicFeatures.default_pom_db()
     
     viability_table = pd.read_csv(Shared.get_dependency("pombe/FYPOviability.tsv"),
                                   header=None,
@@ -753,7 +777,7 @@ def enrich_with_pombe(records):
             ortholog_name = ""
             ortholog_essentiality = ""
         else:
-            ortholog_name = pombe_genes.get(ortholog_row["pombe standard name"].iloc[0], ortholog_row["pombe standard name"].iloc[0]) 
+            ortholog_name = pom_db.get_feature_by_name(ortholog_row["pombe standard name"].iloc[0]).name 
             ortholog_essentiality = essentiality_map.get(ortholog_row["essentiality"].iloc[0], "?")
          
         record["pombe_ortholog"] = ortholog_name
@@ -887,6 +911,8 @@ def draw_histogram(histogram, sample_name, file_name, bins, ylim=300):
     plt.close()
     
 def draw_chrom_map(data, bin_size, title, y_max, outfile):
+    alb_db = GenomicFeatures.default_alb_db()
+    
     chroms = list(alb_db)
     chroms.sort(key=lambda c: c.name)
     max_chrom_len = max(len(c) for c in chroms)
@@ -1028,6 +1054,8 @@ def write_analyzed_hits_into_bed_proteome(target_file, records):
                 bed_file.write("%s\t%d\t%d\n" % (record["feature"].standard_name, aa_hit, aa_hit+1))
 
 def make_hit_map(hits, bin_size):
+    alb_db = GenomicFeatures.default_alb_db()
+    
     result = {chrom.name: [0]*(len(chrom)/bin_size + 1) for chrom in alb_db}
     
     for hit in hits:
@@ -1036,6 +1064,8 @@ def make_hit_map(hits, bin_size):
     return result
 
 def make_read_map(hits, bin_size):
+    alb_db = GenomicFeatures.default_alb_db()
+    
     result = {chrom.name: [0]*(len(chrom)/bin_size + 1) for chrom in alb_db}
     
     for hit in hits:
@@ -1062,6 +1092,8 @@ if __name__ == "__main__":
     read_depth_filter = args.read_depth_filter
     
     Shared.make_dir(output_dir)
+    
+    alb_db = GenomicFeatures.default_alb_db()
     
     input_file_paths = glob.glob(os.path.join(input_dir, "*_Hits.txt"))
     input_filenames = [os.path.split(file_path)[-1][:-9] for file_path in input_file_paths]

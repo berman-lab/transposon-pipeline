@@ -1,4 +1,4 @@
-from GenomicFeatures import cer_db, alb_db
+import GenomicFeatures
 import SummaryTable
 import glob
 import os
@@ -32,6 +32,8 @@ def get_hits_from_bed(bed_file):
     list of dicts
         A list of hit objects, as expected by `SummaryTable.analyze_hits`. 
     """
+    
+    cer_db = GenomicFeatures.default_cer_db()
     
     result = []
     with open(bed_file, 'r') as in_file:
@@ -317,6 +319,9 @@ def classify_albicans(pre_prediction_hits, post_prediction_hits, train_hits,
     
     # For convenience, if the output folder doesn't exist, create it:
     Shared.make_dir(output_folder)
+    
+    alb_db = GenomicFeatures.default_alb_db()
+    cer_db = GenomicFeatures.default_cer_db()
     
     # TODO: ignore features with no hits in neighborhood!
     coverages = SummaryTable.get_alb_coverage()
@@ -838,6 +843,7 @@ if __name__ == "__main__":
     wt2_hits = all_tracks[all_track_filenames.index("Wild Type 2")]
     
     # Test training from cache:
+    cer_db = GenomicFeatures.default_cer_db()
     wt2_analyzed = SummaryTable.analyze_hits(wt2_hits, cer_db, 10000).values()
     wild_type_2_base_records = list( filter_cer_training_data(wt2_analyzed) )
     test_training_data(wild_type_2_base_records,
