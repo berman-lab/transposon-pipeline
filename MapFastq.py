@@ -49,42 +49,28 @@ usage = """USAGE: MapFastq.py
 """
 
 if __name__ == '__main__':
-    import sys
-    import getopt
+    import argparse
     
-    OutputDir = ""
-    FastqFName = ""
-    clean_adapters = False
-    delete_originals = False
-    keep_clean_fqs = False
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-o", "--out-dir", default='.')
+    parser.add_argument("-i", "--input-file-name", required=True)
+    parser.add_argument("-a", "--clean-adapters", default=False, action='store_true')
+    parser.add_argument("-d", "--delete-originals", default=False, action='store_true')
+    parser.add_argument("-k", "--keep-clean-fastqs", default=False, action='store_true')
     
-    try:                                
-        opts, args = getopt.getopt(sys.argv[1:], "o:i:adkh",
-                                   ["OutDir=","InputFileName=","CleanAdapters",
-                                    "DeleteOriginals","KeepCleanFqs","help"])
-    except getopt.GetoptError:
-        print usage
-        sys.exit(2)
-    for opt, arg in opts:
-        if opt in ("-h", "--help"):      
-            print usage
-            sys.exit()                  
-        elif opt in ("-o", "--OutDir"): 
-            OutputDir = arg
-        elif opt in ("-i", "--InputFileName"): 
-            FastqFName = arg
-        elif opt in ("-a", "--CleanAdapters"):
-            clean_adapters = True
-        elif opt in ("-d", "--DeleteOriginals"):
-            delete_originals = True
-        elif opt in ("-k", "--KeepCleanFqs"):
-            keep_clean_fqs = True
-
-    if  len(FastqFName)==0 or len(CInd) ==0:
-        print "Input file or index file not specified, existing."
-        print usage
-        sys.exit(2)
-
+    args = parser.parse_args()
+    
+    OutputDir = args.out_dir
+    FastqFName = args.input_file_name
+    clean_adapters = args.clean_adapters
+    delete_originals = args.delete_originals
+    keep_clean_fqs = args.keep_clean_fastqs
+    
+    # NB: we're first removing the transposon head from the beginning and then 
+    # removing the adapter. This is because the sequencing tech, for whatever reason,
+    # removes the adapater from the 5' Tn end, but keeps the tail adapters (sometimes),
+    # presumably if the reads are too short.
+    # After we have all of the reads that have a transposon, we then trim the adapter from the tail.
     CleanfName = os.path.join(OutputDir, os.path.basename(FastqFName) + '.clean.fq')
     CurrRes = RemoveTn(FastqFName,TnPrimerAndTail,37, CleanfName)
     if clean_adapters:

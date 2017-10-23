@@ -9,10 +9,6 @@ import Shared
 ChrFile = Shared.get_dependency('albicans', 'reference genome', 'C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes_HapA.fasta')
 FeatureFName = Shared.get_dependency('albicans', 'reference genome', 'C_albicans_SC5314_version_A22-s07-m01-r08_chromosomal_feature.tab')
 
-SamCols = ['ReadName','FlagSum', 'Chr','Pos','MapQuality','CIGAR','MateChr','MatePos','InsertSize','ReadSeq','ReadQualities',\
-           'OptField1','OptField2','OptField3','OptField4','OptField5','OptField6','OptField7','OptField8','OptField9','OptField10']
-SamColsTypes = {'ReadName':str,'FlagSum':int, 'Chr':str,'Pos':float,'MapQuality':float,'CIGAR':str,'MateChr':str,'MatePos':int,'InsertSize':int,'ReadSeq':str,'ReadQualities':str,\
-           'OptField1':str,'OptField2':str,'OptField3':str,'OptField4':str,'OptField5':str,'OptField6':str,'OptField7':str,'OptField8':str,'OptField9':str,'OptField10':str}
 ChrFeatCols = ['FeatureName', 'GeneName','Aliases','FeatureType','Chromosome','StartCoord','StopCoord','Strand','PrimaryCGDID','SecondaryCGDID',\
         'Description','DateCreated','SeqCoordVerDate','Blank1','Blank2','GeneNameReserDate','ReservedIsstandardName','SC_ortholog']
 
@@ -172,30 +168,22 @@ usage = """USAGE: MapFastq.py
 """
 
 if __name__ == '__main__':
-    import sys
-    import getopt
+    import argparse
     
-    SamFileDir = ""; GeneListFileDir = ""; MapQ=10; MergeDist=2;
+    parser = argparse.ArgumentParser()
     
-    try:                                
-        opts, args = getopt.getopt(sys.argv[1:], "o:i:q:m:h", ["OutDir=","InDir=","MapQ=","MergeDist=","help"])
-    except getopt.GetoptError:
-        print usage
-        sys.exit(2)                     
-    for opt, arg in opts:                
-        if opt in ("-h", "--help"):      
-            print usage
-            sys.exit()                  
-        elif opt in ("-o", "--OutDir"): 
-            GeneListFileDir = arg
-        elif opt in ("-i", "--InDir"): 
-            SamFileDir = arg
-        elif opt in ("-q", "--MapQ"): 
-            MapQ = int(arg)
-        elif opt in ("-m", "--MergeDist"): 
-            MergeDist = int(arg)
-
-	
+    parser.add_argument("-o", "--out-dir", default='.')
+    parser.add_argument("-i", "--in-dir", default='.')
+    parser.add_argument("-q", "--min-mapq", default=20, type=int)
+    parser.add_argument("-m", "--merge-dist", default=2, type=int)
+    
+    args = parser.parse_args()
+    
+    SamFileDir = args.in_dir
+    GeneListFileDir = args.out_dir
+    MapQ = args.min_mapq
+    MergeDist = args.merge_dist
+    
     #read chromosome Len from fasta file
     ChrLen = {}
     with open(ChrFile,'r') as f:
