@@ -191,7 +191,10 @@ class _FeatureDB(object):
         features = chrom[start:stop]
         
         return RangeSet([(f.start, f.stop) for f in features]).complement(start, stop)
-
+    
+    def get_std_chrom_name(self, chrom_alias):
+        return self._chrom_names[chrom_alias]
+    
     def _create_chrom_cache(self, fasta_filename=None):
         self._cached_chroms = {}
         
@@ -359,6 +362,12 @@ class CerevisiaeFeatureDB(_FeatureDB):
                                   "chrV" : "5", "chrVI" : "6", "chrVII" : "7", "chrVIII" : "8",
                                   "chrIX" : "9", "chrX" : "10", "chrXI" : "11", "chrXII" : "12",
                                   "chrXIII" : "13", "chrXIV" : "14", "chrXV" : "15", "chrXVI" : "16",})
+        self._chrom_names.update({"ref|NC_001133|" : "1", "ref|NC_001134|" : "2", "ref|NC_001135|" : "3",
+                                  "ref|NC_001136|" : "4", "ref|NC_001137|" : "5", "ref|NC_001138|" : "6",
+                                  "ref|NC_001139|" : "7", "ref|NC_001140|" : "8", "ref|NC_001141|" : "9",
+                                  "ref|NC_001142|" : "10", "ref|NC_001143|" : "11", "ref|NC_001144|" : "12",
+                                  "ref|NC_001145|" : "13", "ref|NC_001146|" : "14", "ref|NC_001147|" : "15",
+                                  "ref|NC_001148|" : "16",})
 
 class PombeFeatureDB(_FeatureDB):
     def __init__(self, gff_filename, fasta_filename=None):
@@ -401,10 +410,10 @@ class Chromosome(object):
     
     Mostly for convenience, as it wraps _FeatureDB methods."""
     
-    def __init__(self, name, length, alb_db):
+    def __init__(self, name, length, db):
         self._name = self.name = name
-        self._db = alb_db
-        self._len = alb_db.get_last_effective_chrom_index(name) if length is None else length
+        self._db = db
+        self._len = db.get_last_effective_chrom_index(name) if length is None else length
 
     def __len__(self):
         return self._len

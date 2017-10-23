@@ -9,6 +9,8 @@ import math
 import itertools
 import pandas as pd
 import Shared
+import Organisms
+from RangeSet import RangeSet
 
 import matplotlib
 matplotlib.use('Agg')
@@ -47,8 +49,8 @@ def read_hit_file(filename, read_depth_filter=1):
     with open(filename, "r") as in_file:
         in_file.next()
         for line in in_file:
-            chrom, source, up_feature_type, up_feature_name, up_gene_name, \
-                   up_feature_dist, down_feature_type, down_feature_name, \
+            chrom, source, _up_feature_type, up_feature_name, up_gene_name, \
+                   up_feature_dist, _down_feature_type, down_feature_name, \
                    down_gene_name, down_feature_dist, ig_type, \
                    hit_pos, hit_count = line.split("\t")
             
@@ -85,6 +87,68 @@ def read_hit_file(filename, read_depth_filter=1):
             
             result.append(obj)
                 
+    return result
+
+def read_pombe_hit_file(filename, read_depth_filter=1):
+    # TODO: should be standardized with the Calb hit file.
+    result = []
+    
+    with open(filename, "r") as in_file:
+        reader = csv.reader(in_file)
+        reader.next()
+        for line in reader:
+            chrom, strand, hit_pos, hit_count, gene_name = line
+            
+            hit_pos = int(hit_pos)
+            hit_count = int(hit_count)
+            if hit_count < read_depth_filter:
+                continue
+            
+            obj = {"chrom": chrom,
+                   "source": strand,
+                   "hit_pos": hit_pos,
+                   "hit_count": hit_count,
+                   "gene_name": gene_name}
+            
+            result.append(obj)
+                
+    return result
+
+def get_hits_from_wig(wig_file):
+    """Read hits from a .wig file.
+    
+    Used in reading Kornmann's cerevisiae hit data.
+    """
+    
+    cer_db = GenomicFeatures.default_cer_db()
+    
+    result = []
+    with open(wig_file, 'r') as in_file:
+        in_file.readline() # Drop the header line
+        for line in in_file:
+            if line.startswith("variableStep"):
+                chrom_name = line[line.index("chrom=") + len("chrom="):].strip()
+                continue
+             
+            if chrom_name == 'chrM':
+                continue
+            
+            hit_pos, reads = line.split()
+            hit_pos = int(hit_pos)
+            reads = int(reads)
+            
+            fs = cer_db[chrom_name][hit_pos]
+            if len(fs) == 0:
+                name = ig_type = "nan"
+            else:
+                f = fs[0]
+                name = f.standard_name
+                ig_type = "ORF" # TODO: how do we know it's an ORF? Do we need this?
+            
+            result.append({"chrom": chrom_name, "hit_pos": hit_pos, "gene_name": name,
+                           "ig_type": ig_type,
+                           "hit_count": reads})
+            
     return result
 
 TOTAL_HITS = "Total Hits"
@@ -180,7 +244,7 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
                 }
             ...,
         }
-    """
+    """    
     
     log2 = lambda v: math.log(v, 2)
     
@@ -208,6 +272,21 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
             for domain in feature.domains:
                 domain_mask[domain[0]:domain[1]+1] = True
         
+        # The mask is inverted - the 1 cells are to be kept (they exist and
+        # have a high mapq), and the 0 cells are to be ignored.
+        # TODO: refactor.
+        ignored_mask = np.ones((chrom_len + 1,), dtype=np.bool)
+        if isinstance(feature_db, GenomicFeatures.AlbicansFeatureDB):
+            ignored_range_set = Organisms.alb.ignored_regions[chrom]
+        elif isinstance(feature_db, GenomicFeatures.PombeFeatureDB):
+            ignored_range_set = Organisms.pom.ignored_regions[chrom]
+        elif isinstance(feature_db, GenomicFeatures.CerevisiaeFeatureDB):
+            ignored_range_set = Organisms.cer.ignored_regions[feature_db.get_std_chrom_name(chrom)]
+        else:
+            ignored_range_set = RangeSet()
+        for start, stop in ignored_range_set:
+            ignored_mask[start:stop+1] = False
+        
         hits_across_chrom = np.zeros((chrom_len + 1,), dtype=np.int)
         reads_across_chrom = np.zeros((chrom_len + 1,), dtype=np.int)
         
@@ -218,9 +297,21 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
             hit_pos = hit["hit_pos"]
             if hits_across_chrom[hit_pos] < 2:
                 hits_across_chrom[hit_pos] += 1
-
+            
+            # TODO: have the gene_name be in standard format - common names can
+            # be duplicates, e.g. PDR17
+        
+        # Hits in ignored locations:
+        # There seem to be a few tens of these on each chromosome. A random inspection
+        # with IGV suggests that these are bowtie2 alignment errors - it seems to give
+        # a high MAPQ to reads that should have a low MAPQ (according to our simulated
+        # BAM for finding homologous regions).
+        hits_across_chrom = hits_across_chrom * ignored_mask
+        reads_across_chrom = reads_across_chrom * ignored_mask
+        
         hits_in_features = hits_across_chrom * exon_mask
         hits_outside_features = hits_across_chrom * np.invert(exon_mask)
+        reads_outside_features = reads_across_chrom * np.invert(exon_mask)
         
         records = {} # The per-feature records for this chromosome.
 
@@ -240,7 +331,7 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
             hits_outside_feature = hits_outside_features[window_start:window_end+1]
             hits_outside_feature_count = hits_outside_feature.sum()
             
-            intergenic_region = feature_db.get_interfeature_range(chrom, (window_start, window_end))
+            intergenic_region = feature_db.get_interfeature_range(chrom, (window_start, window_end)) - ignored_range_set
             insertion_index = float(hits_in_feature_count) / feature.coding_length
             
             # There are some scenarios where large regions have no hits whatsoever:
@@ -252,12 +343,31 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
             # however it's up to the downstream tools to filter this. It's suggested
             # to ignore features that had no hits in their neighborhood, as they're
             # probably not informative and will increase error rates.
+            
             if hits_outside_feature_count == 0:
                 neighborhood_index = 0
+                reads_ni = 0
             else:
-                neighborhood_index = insertion_index / (float(hits_outside_feature_count) / intergenic_region.coverage)
+                neighborhood_insertion_index = float(hits_outside_feature_count) / intergenic_region.coverage
+                neighborhood_index = insertion_index / neighborhood_insertion_index
+                reads_ni = (
+                    (float(reads_in_feature) / feature.coding_length) /
+                    (float(reads_outside_features[window_start:window_end+1].sum()) / intergenic_region.coverage)
+                )
+                
+            n_term_insertions = {}
+            for n_term_len in (50, 100):
+                if feature.strand == 'W':
+                    n_term_hits = hits_in_feature[:n_term_len].sum()
+                elif feature.strand == 'C':
+                    n_term_hits = hits_in_feature[max(0, len(hits_in_feature)-n_term_len):].sum()
+                n_term_insertions["n_term_hits_%d" % n_term_len] = n_term_hits
+                n_term_insertions["n_term_ni_%d" % n_term_len] = \
+                    (float(n_term_hits) / n_term_len) / neighborhood_insertion_index if \
+                    hits_outside_feature_count > 0 else 0
             
-            # TODO: We assume that the 100 bp upstream is always intergenic.
+            # TODO: We assume that the 100 bp upstream is always intergenic, but this isn't always the case.
+            # How should we handle this?
             if feature.strand == 'W':
                 upstream_slice_100 = slice(max(1, feature.start - 100), feature.start)
                 upstream_slice_50 = slice(max(1, feature.start - 50), feature.start)
@@ -273,21 +383,35 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
             
             upstream_region_100 = hits_outside_features[upstream_slice_100]
             upstream_region_50 = hits_outside_features[upstream_slice_50]
-            
-            # Compute the longest area without any hits:
-            hit_ixes = [0] + list(np.where(hits_in_feature > 0)[0]+1) + [feature.coding_length + 1]
-            max_free_region = max(right - left for left, right in zip(hit_ixes, hit_ixes[1:])) - 1
-            
             upstream_50_hits = upstream_region_50.sum()
             upstream_100_hits = upstream_region_100.sum()
             
-            # TODO: in Kornmann's paper, they a more permissive free region,
-            # which allowed for 1-2 (presumably) erroneous insertions in the
-            # middle of the region. Should be accounted for. 
-            if max_free_region < 300 or hits_in_feature_count < 20:
-                kornmann_domain_index = 0
-            else:
-                kornmann_domain_index = (max_free_region * hits_in_feature_count) / (feature.coding_length ** 1.5)
+            # Compute the longest area without any hits:
+            hit_ixes = [0] + list(np.where(hits_in_feature > 0)[0]+1) + [feature.coding_length + 1]
+            
+            longest_free_intervals = []
+            freedom_indices = []
+            kornmann_indices = []
+            logit_fis = []
+            max_skip_tns = 4+1
+            for skip_tns in range(max_skip_tns):
+                longest_interval = \
+                    max(right - left for left, right in
+                        zip(hit_ixes, hit_ixes[1+skip_tns:] or [feature.coding_length + 1])) \
+                    - 1
+                
+                longest_free_intervals.append(longest_interval)
+                
+                freedom_index = float(longest_interval) / feature.coding_length
+                freedom_indices.append(freedom_index)
+                
+                if longest_interval >= 300 and 0.1 < freedom_index < 0.9:
+                    kornmann_index = (longest_interval * hits_in_feature_count) / (feature.coding_length ** 1.5)
+                else:
+                    kornmann_index = 0
+                kornmann_indices.append(kornmann_index)
+                
+                logit_fis.append(freedom_index / (1.0 + math.e ** (-0.01 * (feature.coding_length - 200))))
             
             records[feature.standard_name] = {
                 "feature": feature,
@@ -296,22 +420,40 @@ def analyze_hits(dataset, feature_db, neighborhood_window_size=10000):
                 "reads": reads_in_feature,
                 # Can be tested downstream for zero:
                 "neighborhood_hits":  hits_outside_feature_count,
+                "nc_window_len":  intergenic_region.coverage,
                 "insertion_index": insertion_index,
                 "neighborhood_index": neighborhood_index,
+                "reads_ni": reads_ni,
                 "upstream_hits_50": upstream_50_hits,
                 "upstream_hits_100": upstream_100_hits,
-                "max_free_region": max_free_region,
-                "freedom_index": float(max_free_region) / feature.coding_length,
+                "max_free_region": longest_free_intervals[0],
+                "freedom_index": freedom_indices[0],
+                "logit_fi": logit_fis[0],
                 # The value is singular, to get the coefficient we subtract the pre from the post later on:
                 "s_value": log2(reads_in_feature + 1) - total_reads_log, # Add 1 so as to not get a log 0
                 # Note: the positions are relative to the gene, and the introns are excised:
                 "hit_locations": [ix+1 for (ix, hit) in enumerate(hits_in_feature) if hit > 0],
-                "kornmann_domain_index": kornmann_domain_index,
-                "domain_ratio": float(feature.domains.coverage) / feature.coding_length,
+                "longest_interval": longest_free_intervals[4],
+                "kornmann_domain_index": kornmann_indices[4],
+                "domain_ratio": float(feature.domains.coverage)  / feature.coding_length,
                 "hits_in_domains": hits_in_domains_count,
                 "reads_in_domains": reads_in_domains,
                 "domain_coverage": feature.domains.coverage,
+                "skip_longest_free_intervals": longest_free_intervals,
+                "skip_freedom_indices": freedom_indices,
+                "skip_kornmann_indices": kornmann_indices,
+                "logit_fis": logit_fis[0],
+                "bps_between_hits_in_neihgborhood": intergenic_region.coverage / hits_outside_feature_count if hits_outside_feature_count > 0 else 9999,
+                "bps_between_hits_in_feature": len(feature) / hits_in_feature_count if hits_in_feature_count > 0 else 9999
             }
+            
+            records[feature.standard_name].update(n_term_insertions)
+            
+            for skip_tns in range(max_skip_tns):
+                records[feature.standard_name]["longest_free_interval_%d" % skip_tns] = longest_free_intervals[skip_tns]
+                records[feature.standard_name]["freedom_index_%d" % skip_tns] = freedom_indices[skip_tns]
+                records[feature.standard_name]["kornmann_index_%d" % skip_tns] = kornmann_indices[skip_tns]
+                records[feature.standard_name]["logit_fi_%d" % skip_tns] = logit_fis[skip_tns]
             
         result.update(records)
     
@@ -419,15 +561,15 @@ def write_analyzed_alb_records(records, output_file):
         },
         
         {
-            "field_name": "kornmann_domain_index",
-            "csv_name": "Kornmann DI",
+            "field_name": "logit_fi",
+            "csv_name": "Logit FI",
             "format": "%.3f"
         },
         
         {
-            "field_name": "unique_coverage",
-            "csv_name": "Unique coverage",
-            "format": "%.2f"
+            "field_name": "kornmann_domain_index",
+            "csv_name": "Kornmann DI",
+            "format": "%.3f"
         },
         
         {
@@ -478,20 +620,25 @@ def write_data_to_csv(data, cols_config, output_filename):
         The name of the output file.
     """
     
+    df = write_data_to_data_frame(data, cols_config)
+    df.to_csv(output_filename)
+
+def write_data_to_data_frame(data, cols_config):
     field_col = "field_name"
     format_col = "format"
     csv_name_col = "csv_name"
     sort_by_col = "sort_by"
     
     # Filter out field names that don't exist:
-    filtered_cols_config = []
-    first_record = data[0]
-    for col in cols_config:
-        if col[field_col] not in first_record:
-            print "WARNING: %s not in records to print!" % col[field_col]
-            continue
-        filtered_cols_config.append(col)
-    cols_config = filtered_cols_config
+    if data:
+        filtered_cols_config = []
+        first_record = data[0]
+        for col in cols_config:
+            if col[field_col] not in first_record:
+                print "WARNING: %s not in records to print!" % col[field_col]
+                continue
+            filtered_cols_config.append(col)
+        cols_config = filtered_cols_config
     
     # Find sort column:
     sort_field = None
@@ -510,86 +657,111 @@ def write_data_to_csv(data, cols_config, output_filename):
     format_cache = {}
     for col in cols_config:
         col_name = col[csv_name_col]
+        # NB: previously, when writing directly to CSV, without the pandas
+        # intermediary, we would use `"%s" % s` formatting, but that doesn't
+        # work with pandas anymore, so we pass the value as is.
+        # We can consider adding a special pandas format field.
         if format_col not in col:
-            format_cache[col_name] = lambda s: "%s" % s
+            format_cache[col_name] = lambda s: s
         elif callable(col[format_col]):
             format_cache[col_name] = col[format_col]
         else:
-            format_cache[col_name] = lambda s: col[format_col] % s
+            format_cache[col_name] = lambda s: s
     
-    # Write the output CSV:
-    with open(output_filename, 'w') as out_file:
-        writer = csv.writer(out_file, delimiter=',')
-        
-        # Write out the header:
-        writer.writerow([col[csv_name_col] for col in cols_config])
-        
-        # Write the entire dataset:
-        for record in ordered_dataset:
-            writer.writerow([format_cache[col[csv_name_col]](record[col[field_col]]) for col in cols_config])
+    result = pd.DataFrame(
+        data=[[format_cache[col[csv_name_col]](record[col[field_col]]) for col in cols_config] for record in ordered_dataset],
+        columns=[col[csv_name_col] for col in cols_config]
+    )
+    
+    return result
 
-def get_cerevisiae_essentials():
-    """Get consensus essentials and non-essentails in cerevisiae.
-    
-    Consensus is determined by literature agreement - all annotations are
-    required to state one or the other. If disagreement exists, the gene
-    isn't included in any dataset.
-    
-    Returns
-    -------
-    (set, set)
-        A pair sets, denoting the essential and non-essential genes, using
-        their standard names.
-    """
-    
+
+@Shared.memoized
+def get_calb_ess_in_sc():
+    cer_essentials = Organisms.cer.literature_essentials
+    cer_non_essentials = Organisms.cer.literature_non_essentials
+    all_alb_fs = GenomicFeatures.default_alb_db().get_all_features()
     cer_db = GenomicFeatures.default_cer_db()
     
-    viable_filepath = Shared.get_dependency("cerevisiae/cerevisiae_viable_annotations.txt")
-    inviable_filepath = Shared.get_dependency("cerevisiae/cerevisiae_inviable_annotations.txt")
-    
-    viable_table = pd.read_csv(viable_filepath, skiprows=8, delimiter="\t")
-    inviable_table = pd.read_csv(inviable_filepath, skiprows=8, delimiter="\t")
-    
-    annotated_as_viable = set(cer_db.get_feature_by_name(f) for f in set(viable_table["Gene"])) - set([None])
-    annotated_as_inviable = set(cer_db.get_feature_by_name(f) for f in set(inviable_table["Gene"])) - set([None])
-    
-    consensus_viable = annotated_as_viable - annotated_as_inviable
-    consensus_inviable = annotated_as_inviable - annotated_as_viable
-    
-    # TODO: the dubious genes shouldn't be filtered here.
-    consensus_viable_orfs = [f for f in consensus_viable if f.is_orf and f.feature_qualifier != "Dubious"]
-    consensus_inviable_orfs = [f for f in consensus_inviable if f.is_orf and f.feature_qualifier != "Dubious"]
-    
-    return (set(f.standard_name for f in consensus_inviable_orfs),
-            set(f.standard_name for f in consensus_viable_orfs))
+    return (
+        set(f.standard_name for f in all_alb_fs if any(cer_db.get_feature_by_name(c).standard_name in cer_essentials for c in f.cerevisiae_orthologs)),
+        set(f.standard_name for f in all_alb_fs if any(cer_db.get_feature_by_name(c).standard_name in cer_non_essentials for c in f.cerevisiae_orthologs)),
+    )
 
-def get_alb_coverage():
-    """Get a measure of uniqueness of each albicans gene.
+@Shared.memoized
+def get_calb_orths_in_sp():
+    return Organisms.get_calb_orths_in_sp()
+
+@Shared.memoized
+def get_calb_ess_in_sp():
+    # TODO: refactor into the Organisms module.
+    viability_table = pd.read_csv(Shared.get_dependency("pombe/FYPOviability.tsv"),
+                                  header=None,
+                                  delimiter='\t',
+                                  names=["pombe standard name", "essentiality"])
     
-    Unique coverage is defined by the relative area of the gene that can be
-    covered by 100-150 bp reads with a mapping quality of >= 20. This was
-    derived from an NGS analysis of the parental haploid.
+    ortholog_table = pd.read_csv(Shared.get_dependency("albicans/C_albicans_SC5314_S_pombe_orthologs.txt"),
+                                 skiprows=8,
+                                 delimiter='\t',
+                                 header=None,
+                                 usecols=['albicans standard name', 'pombe standard name'],
+                                 names=['albicans standard name', 'albicans common name', 'albicans alb_db id',
+                                        'pombe standard name', 'pombe common name', 'pombe alb_db id'])
     
-    Returns
-    -------
-    dict of str to float
-        A map of standard feature names to a 0-1 float denoting the relative
-        uniqueness of coverage. 
-    """
+    # TODO: we probably don't want to use the hit table, though the InParanoid
+    # table is very stringent.
+    best_hit_table = pd.read_csv(Shared.get_dependency("albicans/C_albicans_SC5314_S_pombe_best_hits.txt"),
+                                 skiprows=8,
+                                 delimiter='\t',
+                                 header=None,
+                                 usecols=['albicans standard name', 'pombe standard name'],
+                                 names=['albicans standard name', 'albicans common name', 'albicans alb_db id',
+                                        'pombe standard name', 'pombe common name', 'pombe alb_db id'])
     
-    unique_coverage = {}
-    with open(Shared.get_dependency("albicans/unique_coverage.csv"), 'r') as in_file:
-        reader = csv.reader(in_file, delimiter=',')
-        for line in reader:
-            feature_name, percent_covered = line
-            unique_coverage[feature_name] = float(percent_covered) / 100
+    ortholog_table = pd.concat([ortholog_table, best_hit_table])
+     
+    joined_table = pd.merge(ortholog_table, viability_table, on="pombe standard name")
+    
+    essentials = set()
+    non_essentials = set()
+    for alb_feature in GenomicFeatures.default_alb_db().get_all_features():
+        ortholog_row = joined_table[joined_table["albicans standard name"] == alb_feature.standard_name]
+        if ortholog_row.empty:
+            continue 
         
-    return unique_coverage
+        ess_annotation = ortholog_row["essentiality"].iloc[0]
+        if ess_annotation == "viable":
+            non_essentials.add(alb_feature.standard_name)
+        elif ess_annotation == "inviable":
+            essentials.add(alb_feature.standard_name)
+            
+    return (essentials, non_essentials)
+
+def enrich_with_pombe(records):
+    """Add pombe orthologs and essentiality annotations to albicans records."""
+    
+    # TODO: maybe we should add this to analyze_hits? 
+    
+    essentials, non_essentials = get_calb_ess_in_sp()
+    sp_orthologs = get_calb_orths_in_sp()
+    
+    for record in records:
+        alb_name = record["feature"].standard_name
+        
+        ortholog_name = sp_orthologs.get(alb_name, "")
+        ortholog_essentiality = "Yes" if alb_name in essentials else \
+                                "No" if alb_name in non_essentials else \
+                                ""
+         
+        record["pombe_ortholog"] = ortholog_name
+        record["essential_in_pombe"] = ortholog_essentiality
 
 def enrich_alb_records(records):
     """Enrich albicans records with 3-rd party data.
     
     3-rd party data include orthologs, essentiality from literature, etc."""
+    
+    # TODO: maybe we should add this to analyze_hits?
     
     cer_db = GenomicFeatures.default_cer_db()
     
@@ -597,7 +769,8 @@ def enrich_alb_records(records):
     enrich_with_pombe(records)
 
     # Cerevisiae:
-    cer_essentials, cer_non_essentials = get_cerevisiae_essentials()
+    cer_essentials = Organisms.cer.literature_essentials
+    cer_non_essentials = Organisms.cer.literature_non_essentials
 
     # TODO: document the origin of the synthetic lethal dataset.
     cer_synthetic_lethals = {}
@@ -655,17 +828,25 @@ def enrich_alb_records(records):
     roemer_grace_essentials, roemer_grace_non_essentials, \
         omeara_grace_essentials, omeara_grace_non_essentials = get_grace_essentials()
     
-    unique_coverage = get_alb_coverage()
+    homann_deletions = get_homann_deletions()
+    noble_deletions = get_noble_deletions()
+    sanglard_deletions = get_sanglard_deletions()
+    
+    mitchell_essentials = get_mitchell_essentials()
     
     for record in records:
         feature = record["feature"]
+        std_name = feature.standard_name
         if feature.cerevisiae_orthologs:
             # TODO: according to albicans feature file, a gene may have more than one ortholog, but in practice this doesn't happen.
             assert len(feature.cerevisiae_orthologs) == 1
             cer_ortholog = cer_db.get_feature_by_name(iter(feature.cerevisiae_orthologs).next()).standard_name
             
+            # TODO: ? should be reserved for conflicting entries, not just those
+            # for which data in not available.
             record["essential_in_cerevisiae"] = "Yes" if cer_ortholog in cer_essentials else \
-                                                "No" if cer_ortholog in cer_non_essentials else "?"
+                                                "No" if cer_ortholog in cer_non_essentials else \
+                                                "?" if cer_ortholog in Organisms.cer.conflicting_essentials else ""
              
             record["cer_synthetic_lethal"] = cer_synthetic_lethals.get(cer_ortholog, "")
             record["cer_fitness"] = cer_fitness.get(cer_ortholog, "")
@@ -673,14 +854,42 @@ def enrich_alb_records(records):
             record["essential_in_cerevisiae"] = ""
             record["cer_synthetic_lethal"] = ""
             record["cer_fitness"] = ""
-        record["unique_coverage"] = unique_coverage.get(feature.standard_name, 1)
-        record["essential_in_albicans"] = "Yes" if feature.standard_name in alb_pheno_essential_consensus else \
-            "No" if feature.standard_name in alb_pheno_non_essential_consensus else \
-            "?" if feature.standard_name in alb_pheno_toss_up else ""
-        record["essential_in_albicans_grace_roemer"] = "Yes" if feature.standard_name in roemer_grace_essentials else \
-            "No" if feature.standard_name in roemer_grace_non_essentials else ""
+        record["essential_in_albicans"] = "Yes" if std_name in alb_pheno_essential_consensus else \
+            "No" if std_name in alb_pheno_non_essential_consensus else \
+            "?" if std_name in alb_pheno_toss_up else ""
+        record["essential_in_albicans_grace_roemer"] = "Yes" if std_name in roemer_grace_essentials else \
+            "No" if std_name in roemer_grace_non_essentials else ""
         record["essential_in_albicans_grace_omeara"] = "Yes" if feature.standard_name in omeara_grace_essentials else \
-            "No" if feature.standard_name in omeara_grace_non_essentials else ""
+            "No" if std_name in omeara_grace_non_essentials else ""
+            
+        record["homann_deletions"] = "Deleted" if std_name in homann_deletions else ""
+        record["noble_deletions"] = "Deleted" if std_name in noble_deletions else ""
+        record["sanglard_deletions"] = "Deleted" if std_name in sanglard_deletions else ""
+        record["deleted_in_calb"] = ",".join(filter(None, [record["homann_deletions"] and "Homann", record["noble_deletions"] and "Noble", record["sanglard_deletions"] and "Sanglard"]))
+        
+        record["essential_in_mitchell"] = "Yes" if std_name in mitchell_essentials else ""
+
+@Shared.memoized
+def get_homann_deletions():
+    # TODO: the deletions should be listed in the Organisms module instead of here.
+    alb_db = GenomicFeatures.default_alb_db()
+    mutants_filepath = Shared.get_dependency("albicans/MUTANT COLLECTIONS IN PROGRESS July 5 2017.xlsx")
+    mutants_table = pd.read_excel(mutants_filepath, skiprows=1, header=None, parse_cols="A")
+    return set(f.standard_name for f in (alb_db.get_feature_by_name(n) for n in mutants_table[0]) if f)
+
+@Shared.memoized
+def get_noble_deletions():
+    alb_db = GenomicFeatures.default_alb_db()
+    mutants_filepath = Shared.get_dependency("albicans/MUTANT COLLECTIONS IN PROGRESS July 5 2017.xlsx")
+    mutants_table = pd.read_excel(mutants_filepath, skiprows=1, header=None, parse_cols="P")
+    return set(f.standard_name for f in (alb_db.get_feature_by_name(n.lower()) for n in mutants_table[0]) if f)    
+
+@Shared.memoized
+def get_sanglard_deletions():
+    alb_db = GenomicFeatures.default_alb_db()
+    mutants_filepath = Shared.get_dependency("albicans/MUTANT COLLECTIONS IN PROGRESS July 5 2017.xlsx")
+    mutants_table = pd.read_excel(mutants_filepath, skiprows=1, header=None, parse_cols="J")
+    return set(f.standard_name for f in (alb_db.get_feature_by_name(str(n) + "_A") for n in mutants_table[0]) if f)
 
 @Shared.memoized
 def get_grace_essentials():
@@ -694,6 +903,10 @@ def get_grace_essentials():
     tuple of sets of str : (roemer_essentials, roemer_non_essentials,
                             omeara_essentials, omeara_non_essentials)
     """
+    
+    # TODO: should be listed in the Organisms module instead of here.
+    # TODO: figure out if Roemer data actually exists in O'Meara's tables,
+    # or was it but an illusion.
     
     grace_table_path = Shared.get_dependency("albicans/ncomms7741-s2.xls")
     grace_table = pd.read_excel(grace_table_path, sheetname=1, #"Essentiality scores",
@@ -750,51 +963,17 @@ def get_grace_essentials():
     return (roemer_grace_essentials, roemer_grace_non_essentials,
             omeara_grace_essentials, omeara_grace_non_essentials)
 
-def enrich_with_pombe(records):
-    """Add pombe orthologs and essentiality annotations to albicans records."""
+@Shared.memoized
+def get_mitchell_essentials():
+    # TODO: should be in Organisms.
+    alb_db = GenomicFeatures.default_alb_db()
     
-    pom_db = GenomicFeatures.default_pom_db()
-    
-    viability_table = pd.read_csv(Shared.get_dependency("pombe/FYPOviability.tsv"),
-                                  header=None,
-                                  delimiter='\t',
-                                  names=["pombe standard name", "essentiality"])
-    
-    ortholog_table = pd.read_csv(Shared.get_dependency("albicans/C_albicans_SC5314_S_pombe_orthologs.txt"),
-                                 skiprows=8,
-                                 delimiter='\t',
-                                 header=None,
-                                 usecols=['albicans standard name', 'pombe standard name'],
-                                 names=['albicans standard name', 'albicans common name', 'albicans alb_db id',
-                                        'pombe standard name', 'pombe common name', 'pombe alb_db id'])
-    
-    # TODO: we probably don't want to use the hit table, though the InParanoid
-    # table is very stringent.
-    best_hit_table = pd.read_csv(Shared.get_dependency("albicans/C_albicans_SC5314_S_pombe_best_hits.txt"),
-                                 skiprows=8,
-                                 delimiter='\t',
-                                 header=None,
-                                 usecols=['albicans standard name', 'pombe standard name'],
-                                 names=['albicans standard name', 'albicans common name', 'albicans alb_db id',
-                                        'pombe standard name', 'pombe common name', 'pombe alb_db id'])
-    
-    ortholog_table = pd.concat([ortholog_table, best_hit_table])
-     
-    joined_table = pd.merge(ortholog_table, viability_table, on="pombe standard name")
-     
-    essentiality_map = {"viable": "No", "inviable": "Yes", "condition-dependent": "Conditional"}
-    for record in records:
-        ortholog_row = joined_table[joined_table["albicans standard name"] == record["feature"].standard_name]
-        if ortholog_row.empty:
-            ortholog_name = ""
-            ortholog_essentiality = ""
-        else:
-            ortholog_name = pom_db.get_feature_by_name(ortholog_row["pombe standard name"].iloc[0]).name 
-            ortholog_essentiality = essentiality_map.get(ortholog_row["essentiality"].iloc[0], "?")
-         
-        record["pombe_ortholog"] = ortholog_name
-        record["essential_in_pombe"] = ortholog_essentiality
+    with open(Shared.get_dependency("albicans", "List of possibly ess genes from Aaron Mitchell.csv"), 'r') as in_file:
+        orfs_19 = [s.strip() for s in in_file.read().split()]
+        orfs_22 = filter(None, (alb_db.get_feature_by_name(o) for o in orfs_19))
         
+    return set(o.standard_name for o in orfs_22)
+
 def compare_insertion_and_neighborhood((analysis_labels, analyses), output_file):
     """Compare the insertion and the neighborhood indices with Pearson and
     Spearman correlations.
@@ -1111,6 +1290,32 @@ if __name__ == "__main__":
     input_filenames = [os.path.split(file_path)[-1][:-9] for file_path in input_file_paths]
     
     all_hits = read_hit_files(input_file_paths, read_depth_filter)
+    
+    # Write per-bin hits and reads, for 3D analysis:
+    bin_size = 10000
+    # [hits, reads, hit rank, read rank]
+    hit_read_bins = {fname: {chrom.name: [[0, 0, 0, 0] for _ in range(len(chrom) / bin_size + 1)] for chrom in alb_db} for fname in input_filenames}
+    for fname, hits in zip(input_filenames, all_hits):
+        fname_hit_read_bins = hit_read_bins[fname]
+        for hit in hits:
+            bin = hit["hit_pos"] / bin_size
+            bin_data = fname_hit_read_bins[hit["chrom"]][bin]
+            bin_data[0] += 1
+            bin_data[1] += hit["hit_count"]
+    
+    from itertools import chain
+    for fname_hit_read_bins in hit_read_bins.values():
+        for bin_rank, bin_data in enumerate(sorted(chain(*fname_hit_read_bins.values()), key=lambda b: b[0], reverse=True)):
+            bin_data[2] = bin_rank+1
+            
+    with open(os.path.join(output_dir, "binned_hits.RDF_%d.csv" % read_depth_filter), "w") as out_file:
+        writer = csv.writer(out_file)
+        writer.writerow(["Bin index"] + list(chain(*zip(input_filenames, ["%s rank" % fname for fname in input_filenames]))))
+        import re
+        for chrom in sorted(alb_db, key=lambda c: c.name):
+            chrom_ix = re.match(".*chr(.)", chrom.name).group(1)
+            for bin_ix in range(len(chrom) / bin_size + 1):
+                writer.writerow(["%s-%d" % (chrom_ix, bin_ix)] + list(chain(*[hit_read_bins[fname][chrom.name][bin_ix][0::2] for fname in input_filenames])))
     
     all_analyzed = [analyze_hits(dataset, alb_db, 10000) for dataset in all_hits]
     

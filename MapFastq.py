@@ -1,10 +1,12 @@
 import os
 from subprocess import PIPE, Popen
+import Shared
+
 CutAdaptCMD = '/usr/local/bin/cutadapt'
 TnPrimerAndTail = 'GTATTTTACCGACCGTTACCGACCGTTTTCATCCCTA'
 BowtiePath = '/usr/local/bin/'
 # NB: bowtie2 requires spaces to be escapes with a backslash for the -x parameter.
-CInd = 'dependencies/albicans/reference\ genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes_HapA'
+CInd = Shared.get_dependency("albicans", "reference genome", "C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes_HapA").replace(' ', '\ ')
 CORES = 4 # How many cores on the machine = how many threads should the external tools utilize
 
 def GetReads(Val,Text):

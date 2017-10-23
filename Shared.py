@@ -14,12 +14,12 @@ def get_script_dir():
     
     return os.path.dirname(os.path.realpath(__file__))
 
-def get_dependency(filename):
+def get_dependency(*path_components):
     """Given a relative filename of a dependency, return the absolute path
     relative to the current script.
     """
     
-    return os.path.join(get_script_dir(), "dependencies", filename)
+    return os.path.join(*((get_script_dir(), "dependencies") + path_components))
 
 def flatten(seq_of_seqs):
     """Flatten a sequence of sequences into a single sequence.

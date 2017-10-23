@@ -3,10 +3,11 @@ import pandas as pd
 import numpy as np
 import pysam
 import itertools
+import Shared
 
 # TODO: move to config file.
-ChrFile = 'dependencies/albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes_HapA.fasta'
-FeatureFName = 'dependencies/albicans/reference genome/C_albicans_SC5314_version_A22-s07-m01-r08_chromosomal_feature.tab'
+ChrFile = Shared.get_dependency('albicans', 'reference genome', 'C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes_HapA.fasta')
+FeatureFName = Shared.get_dependency('albicans', 'reference genome', 'C_albicans_SC5314_version_A22-s07-m01-r08_chromosomal_feature.tab')
 
 SamCols = ['ReadName','FlagSum', 'Chr','Pos','MapQuality','CIGAR','MateChr','MatePos','InsertSize','ReadSeq','ReadQualities',\
            'OptField1','OptField2','OptField3','OptField4','OptField5','OptField6','OptField7','OptField8','OptField9','OptField10']
@@ -218,7 +219,7 @@ if __name__ == '__main__':
         Feat = ChrFeature[(ChrFeature.Chromosome==Chr) & (ChrFeature.Strand == 'W') ]
         for row in Feat.iterrows():
             #each position in the chromosome vector is assigned with the feature index relevant to it        
-            ChrFeatW[Chr][row[1].StartCoord: row[1].StopCoord+1] = row[0]
+            ChrFeatW[Chr][int(row[1].StartCoord): int(row[1].StopCoord)+1] = row[0]
 
     #again, creating the a dictionary of chromosome and its feature but for the crick strand
     ChrFeatC={}
@@ -230,7 +231,7 @@ if __name__ == '__main__':
         Feat = ChrFeature[(ChrFeature.Chromosome==Chr) & (ChrFeature.Strand == 'C')]
         for row in Feat.iterrows():
             #each position in the chromosome vector is assigned with the feature index relevant to it        
-            ChrFeatC[Chr][row[1].StopCoord: row[1].StartCoord+1] = row[0]
+            ChrFeatC[Chr][int(row[1].StopCoord): int(row[1].StartCoord)+1] = row[0]
 
     # Preprocess the ChrFeat maps to include (left, right) tuples of the nearest features for every index:
     for feat_map in (ChrFeatC, ChrFeatW):
