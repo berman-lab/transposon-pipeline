@@ -875,7 +875,7 @@ def get_homann_deletions():
     alb_db = GenomicFeatures.default_alb_db()
     mutants_filepath = Shared.get_dependency("albicans/MUTANT COLLECTIONS IN PROGRESS July 5 2017.xlsx")
     mutants_table = pd.read_excel(mutants_filepath, skiprows=1, header=None, parse_cols="A")
-    return set(f.standard_name for f in (alb_db.get_feature_by_name(n) for n in mutants_table[0]) if f)
+    return set(f.standard_name for f in (alb_db.get_feature_by_name(str(n) + "_A") for n in mutants_table[0]) if f)
 
 @Shared.memoized
 def get_noble_deletions():
