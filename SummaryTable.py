@@ -17,6 +17,14 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse, Rectangle
 
+
+usage = '''SummaryTable.py  
+    -i  --input_dir             [str]   Input directory of '*_Hits.txt'. Defaults to current directory if left unspecified.
+    -o  --output-dir            [str]   Output directory for results. Defaults to current directory if left unspecified.
+    -f  --read-depth-filter     [str]   Read depth below which insertion events will be ignored. Default is 1
+    -h  --help                          Show this help message and exit 
+'''
+
 def read_hit_files(files, read_depth_filter=1):
     """Read in the list of hits files.
     
@@ -1272,9 +1280,10 @@ def transform_chrom_map_with_log(read_map, base):
     return read_map
 
 if __name__ == "__main__":    
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input-dir", required=True)
-    parser.add_argument("-o", "--output-dir", required=True)
+    parser = argparse.ArgumentParser(usage=usage)
+    
+    parser.add_argument("-i", "--input-dir", default='.')
+    parser.add_argument("-o", "--output-dir", default='.')
     parser.add_argument("-f", "--read-depth-filter", type=int, default=1)
     args = parser.parse_args()
     

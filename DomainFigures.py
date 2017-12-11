@@ -10,16 +10,40 @@ from RangeSet import RangeSet
 import Organisms
 from Organisms import get_orths_by_name
 
+
+usage = '''DomainFigures.py
+    --hits-dir          [str]   Input folder for hits file. Defaults to current directory if left unspecified.
+    --output-dir        [str]   Output folder.  Defaults to current directory if left unspecified.
+    --domains           [str]   Choose between: all, highlighted, none  ("highlighted" is default)
+    --direction         [str]   Choose between: all, highlighted, none  ("highlighted" is default)
+    --organism          [str]   Choose between: Calb, Scer, Spom        ("Calb" is default)
+    --absolute-pixel-size [int]     ??explanation? default is 0
+    -h  --help                  Show this help message and exit
+    
+    SOURCE TYPE COMMANDS:
+        region
+            --chromosome    [str]
+            --start         [int]
+            --stop          [int]
+            --genes         [gene_list_parser]
+            
+        gene
+            --genes             [gene_list_parser]
+            --percent-of-length [float]
+            --bps               [int]          Basepairs flanking drawn gene. Default is 20000       
+'''
+
+
 def _get_organism(org_name):
     return {"Calb": Organisms.alb, "Scer": Organisms.cer, "Spom": Organisms.pom}[org_name]
 
 GENES_ALL, GENES_HIGHLIGHTED, GENES_NONE = ("all", "highlighted", "none")
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(usage=usage)
     
-    parser.add_argument("--hits-folder", default=".")
-    parser.add_argument("--output-folder", default=".")
+    parser.add_argument("--hits-dir", default=".")
+    parser.add_argument("--output-dir", default=".")
     parser.add_argument("--domains", default="highlighted", choices=[GENES_ALL, GENES_HIGHLIGHTED, GENES_NONE])
     parser.add_argument("--direction", default="highlighted", choices=[GENES_ALL, GENES_HIGHLIGHTED, GENES_NONE])
     parser.add_argument("--organism", default="Calb", choices=["Calb", "Scer", "Spom"])
@@ -41,7 +65,7 @@ def main():
     gene_name.add_argument("--genes", type=gene_list_parser)
     gene_region = gene_parser.add_mutually_exclusive_group()
     gene_region.add_argument("--percent-of-length", type=float, default=0.2)
-    gene_region.add_argument("--bps", type=int)
+    gene_region.add_argument("--bps", type=int, default = 20000)
     
     config_file_parser = subparsers.add_parser("config_file")
     config_file_parser.add_argument("config_file")
@@ -386,7 +410,7 @@ if __name__ == "__main__":
 
 
 # Running arguments:
-# --hits-folder "/Users/bermanlab/ngs-bench/tn drawings/hits" --output "/tmp" --organism Calb --absolute-pixel-size 10 --domains all --direction all gene --bps 2000  --alb ADE2,ERG11
-# --hits-folder ~/ngs-bench/tn\ drawings/scer\ hits/ --output-folder ~/ngs-bench/tn\ drawings/scer\ figs/ --organism Scer --absolute-pixel-size 10 gene --alb "*" --bps 2000
+# --hits-dir "/Users/bermanlab/ngs-bench/tn drawings/hits" --output "/tmp" --organism Calb --absolute-pixel-size 10 --domains all --direction all gene --bps 2000  --alb ADE2,ERG11
+# --hits-dir ~/ngs-bench/tn\ drawings/scer\ hits/ --output-dir ~/ngs-bench/tn\ drawings/scer\ figs/ --organism Scer --absolute-pixel-size 10 gene --alb "*" --bps 2000
 # --hits-folder "/Users/bermanlab/ngs-bench/tn drawings/hits" --output "/tmp" --organism Calb --absolute-pixel-size 10 --domains all --direction all region --chromosome R --start 254000 --stop 263000
-# --hits-folder "/Users/bermanlab/ngs-bench/tn drawings/scer hits/" --output-folder "/Users/bermanlab/ngs-bench/tn drawings/scer figs/" --organism Scer --absolute-pixel-size 10 gene --alb * --bps 2000
+# --hits-dir "/Users/bermanlab/ngs-bench/tn drawings/scer hits/" --output-folder "/Users/bermanlab/ngs-bench/tn drawings/scer figs/" --organism Scer --absolute-pixel-size 10 gene --alb * --bps 2000

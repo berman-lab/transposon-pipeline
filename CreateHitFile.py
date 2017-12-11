@@ -5,6 +5,18 @@ import pysam
 import itertools
 import Shared
 
+
+					
+usage = '''CreateHitFile.py  
+   -i  --in-dir     [str]   Input directory with .sam files to parse. Defaults to current directory if left unspecified.
+   -o  --out-dir    [str]   Output directory to which the hit file will be writen. Defaults to current directory if left unspecified.
+   -q  --min-mapq   [int]   Map Quality - hits to parse from the sam file (default is 10)
+   -m  --merge-dist [int]   Hits to merge with at most x nt distance between two hits. Default is 2 
+                                Example: Hits in positions 1 and 3  (3-1=2) will be united into a single hit
+   -h  --help               Show this help message and exit 
+'''
+
+
 # TODO: move to config file.
 ChrFile = Shared.get_dependency('albicans', 'reference genome', 'C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes_HapA.fasta')
 FeatureFName = Shared.get_dependency('albicans', 'reference genome', 'C_albicans_SC5314_version_A22-s07-m01-r08_chromosomal_feature.tab')
@@ -158,19 +170,12 @@ def ListHitProp(ChrHitList, FileName,ChrFeatC, ChrFeatW):
     Featuref.close()
                         
 					
-					
-usage = """USAGE: MapFastq.py  
-   -i  --InDir         [str]   Input directory with .sam files to parse (deafualt is curr dir)
-   -o  --OutDir        [str]   Output directory to which the hit file will be writen (deafualt is curr dir)
-   -q  --MapQ          [int]   Map Quality - hits to parse from the sam file (default is 10)
-   -m  --MergeDist     [int]   Hits to merge with at most x nt distance between two hits (deafult is 2, that is that hit in pos 1 & 3 (3-1=2) will be united into a single hit
-   -h, --help                    print this help 
-"""
+
 
 if __name__ == '__main__':
     import argparse
     
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(usage=usage)
     
     parser.add_argument("-o", "--out-dir", default='.')
     parser.add_argument("-i", "--in-dir", default='.')
