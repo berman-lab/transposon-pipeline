@@ -4,9 +4,8 @@ import Shared
 
 usage = '''MapFastq.py  
    -o  --out-dir            [str]   Output directory. Defaults to current directory if left unspecified.
-   -i  --input-fastq-file   [str]   REQUIRED. Input fastq file (Need to include path and '.fastq.gz' at end of filename)
-   -t  --transposon-seq     [str]   Transposon sequence, default is Berman Tn with primer
-   -a  --clean-adapters     [bool]  Clean Illumina universl adapters.
+   -i  --input-file-name    [str]   REQUIRED. Input fastq file (Need to include path and '.fastq.gz' at end of filename)
+   -a  --clean-adapters     [bool]  Clean Illumina universal adapters.
    -d  --delete-originals   [bool]  Delete input FASTQ files.
    -k  --keep-clean-fqs     [bool]  Keep the cleaned FASTQ files.
    -h  --help                       Show this help message and exit 
@@ -88,7 +87,7 @@ if __name__ == '__main__':
     LogFile = open('log.txt', 'r+')
     CutAdaptPath = GetCmdPath('cutadapt') 
     BowtiePath = GetCmdPath('bowtie2')
-  
+    
     # NB: we're first removing the transposon head from the beginning and then 
     # removing the adapter. This is because the sequencing tech, for whatever reason,
     # removes the adapater from the 5' Tn end, but keeps the tail adapters (sometimes),
