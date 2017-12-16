@@ -8,9 +8,9 @@ import Shared
 
 					
 usage = '''CreateHitFile.py  
-   -i  --in-dir     [str]   Input directory with .sam files to parse. Defaults to current directory if left unspecified.
+   -i  --in-dir     [str]   Input directory with .bam files to parse. Defaults to current directory if left unspecified.
    -o  --out-dir    [str]   Output directory to which the hit file will be writen. Defaults to current directory if left unspecified.
-   -q  --min-mapq   [int]   Map Quality - hits to parse from the sam file (default is 10)
+   -q  --min-mapq   [int]   Map Quality - hits to parse from the bam file (default is 20)
    -m  --merge-dist [int]   Hits to merge with at most x nt distance between two hits. Default is 2 
                                 Example: Hits in positions 1 and 3  (3-1=2) will be united into a single hit
    -h  --help               Show this help message and exit 
@@ -260,13 +260,20 @@ if __name__ == '__main__':
     for Name in fNames:
         BaseName = os.path.basename(Name)
         OutFileName = os.path.join(GeneListFileDir, BaseName[:-4] + '_Hits.txt')
-        if os.path.isfile(OutFileName): #check first if the file already exists as it is very time consuming. if we want to re create the hit file, just delete or rename it
+        if os.path.isfile(OutFileName): 
+        #check first if the file already exists as it is very time consuming. if we want to re create the hit file, just delete or rename it
+            print 'ERROR: Hit file for %s already exists.' % (BaseName)
             continue;
         Sami = pysam.AlignmentFile(Name, "rb")
-        print "parsing file {}".format(BaseName)
+        print "Parsing file %s..." % (BaseName)
+        
         MyList,TotalHits, TotalUniqueHits, TotalReads = FindHitsPerSample(Sami,ChrFeatW, MergeDist,MapQ) 
         ListHitProp(MyList, OutFileName, ChrFeatC, ChrFeatW) 
-        print "total hits positions (Map quality >= {}): {:,}".format(MapQ,TotalHits)
-        print "Unique hits position (minimal dist = {} bp) : {:,}".format(MergeDist,TotalUniqueHits)
-        print 'total reads found: {:,} (Map quality >= {})'.format(TotalReads,MapQ)
+        UniqueHitPercent = round(float(TotalUniqueHits)/float(TotalHits)*100, 2)
         
+        Log = '=== Finding hits ===\r\n%s reads found of map quality >= %s; in these:\r\n  %s hits were found; of these:\r\n    %s (%s%%) hit positions were found to be unique (Minimal distance = %s)\r\n' % (TotalReads, MapQ, TotalHits, TotalUniqueHits, UniqueHitPercent, MergeDist)
+        print Log
+        
+        LogFile = open('log.txt', 'a')
+        LogFile.write(Log)
+        LogFile.close()
