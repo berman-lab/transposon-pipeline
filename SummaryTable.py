@@ -882,21 +882,21 @@ def get_homann_deletions():
     # TODO: the deletions should be listed in the Organisms module instead of here.
     alb_db = GenomicFeatures.default_alb_db()
     mutants_filepath = Shared.get_dependency("albicans/MUTANT COLLECTIONS IN PROGRESS July 5 2017.xlsx")
-    mutants_table = pd.read_excel(mutants_filepath, skiprows=1, header=None, parse_cols="A")
+    mutants_table = pd.read_excel(mutants_filepath, skiprows=1, header=None, usecols="A")
     return set(f.standard_name for f in (alb_db.get_feature_by_name(str(n) + "_A") for n in mutants_table[0]) if f)
 
 @Shared.memoized
 def get_noble_deletions():
     alb_db = GenomicFeatures.default_alb_db()
     mutants_filepath = Shared.get_dependency("albicans/MUTANT COLLECTIONS IN PROGRESS July 5 2017.xlsx")
-    mutants_table = pd.read_excel(mutants_filepath, skiprows=1, header=None, parse_cols="P")
+    mutants_table = pd.read_excel(mutants_filepath, skiprows=1, header=None, usecols="P")
     return set(f.standard_name for f in (alb_db.get_feature_by_name(n.lower()) for n in mutants_table[0]) if f)    
 
 @Shared.memoized
 def get_sanglard_deletions():
     alb_db = GenomicFeatures.default_alb_db()
     mutants_filepath = Shared.get_dependency("albicans/MUTANT COLLECTIONS IN PROGRESS July 5 2017.xlsx")
-    mutants_table = pd.read_excel(mutants_filepath, skiprows=1, header=None, parse_cols="J")
+    mutants_table = pd.read_excel(mutants_filepath, skiprows=1, header=None, usecols="J")
     return set(f.standard_name for f in (alb_db.get_feature_by_name(str(n) + "_A") for n in mutants_table[0]) if f)
 
 @Shared.memoized
@@ -917,7 +917,7 @@ def get_grace_essentials():
     # or was it but an illusion.
     
     grace_table_path = Shared.get_dependency("albicans/ncomms7741-s2.xls")
-    grace_table = pd.read_excel(grace_table_path, sheetname=1, #"Essentiality scores",
+    grace_table = pd.read_excel(grace_table_path, sheet_name=1, #"Essentiality scores",
                                 skiprows=14, header=None,
                                 names=["orf19 name", "Common", "Description", "Plate", "Position",
                                        "tet growth", "5-FOA excision", "dox growth", "Essentiality Concordance  (Y/N)",

@@ -271,7 +271,7 @@ if __name__ == '__main__':
         ListHitProp(MyList, OutFileName, ChrFeatC, ChrFeatW) 
         UniqueHitPercent = round(float(TotalUniqueHits)/float(TotalHits)*100, 2)
         
-        Log = '=== Finding hits ===\r\n%s reads found of map quality >= %s; in these:\r\n  %s hits were found; of these:\r\n    %s (%s%%) hit positions were found to be unique (Minimal distance = %s)\r\n' % (TotalReads, MapQ, TotalHits, TotalUniqueHits, UniqueHitPercent, MergeDist)
+        Log = '\r\n=== Finding hits ===\r\n%s reads found of map quality >= %s; in these:\r\n  %s hits were found; of these:\r\n    %s (%s%%) hit positions were found to be unique (Minimal distance = %s)\r\n' % (TotalReads, MapQ, TotalHits, TotalUniqueHits, UniqueHitPercent, MergeDist)
         print Log
         
         LogFile = open('log.txt', 'a')

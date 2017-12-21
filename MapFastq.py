@@ -4,7 +4,7 @@ import Shared
 
 usage = '''MapFastq.py  
    -o  --out-dir            [str]   Output directory. Defaults to current directory if left unspecified.
-   -i  --input-file-name    [str]   REQUIRED. Input fastq file (Need to include path and '.fastq.gz' at end of filename)
+   -i  --input-file-name    [str]   REQUIRED. Input fastq file (Need to include path and .fastq.gz at end of filename)
    -a  --clean-adapters     [bool]  Clean Illumina universal adapters.
    -d  --delete-originals   [bool]  Delete input FASTQ files.
    -k  --keep-clean-fqs     [bool]  Keep the cleaned FASTQ files.
@@ -69,7 +69,7 @@ def AlignFastq(BowtiePath, CleanfName, SamfName):
 if __name__ == '__main__':
     import argparse
     
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(usage=usage)
     parser.add_argument("-o", "--out-dir", default='.')
     parser.add_argument("-i", "--input-file-name", required=True)
     parser.add_argument("-a", "--clean-adapters", default=False, action='store_true')
@@ -84,7 +84,7 @@ if __name__ == '__main__':
     delete_originals = args.delete_originals
     keep_clean_fqs = args.keep_clean_fastqs
     
-    LogFile = open('log.txt', 'r+')
+    LogFile = open('log.txt', 'w+')
     CutAdaptPath = GetCmdPath('cutadapt') 
     BowtiePath = GetCmdPath('bowtie2')
     
