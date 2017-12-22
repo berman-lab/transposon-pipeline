@@ -1,18 +1,25 @@
 # A module based on "ExperimentCoparison.py"
 # Hopefully useable in a more universal way.
+# Need help with ven diagram stuff
 
 import os
 import argparse
 import csv
 import glob
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 import GenomicFeatures
 import Shared
 from SummaryTable import read_hit_files, analyze_hits, write_data_to_csv
+from matplotlib_venn import venn2
 
 usage = '''AnalyzeAssays.py
     -1st    --first-input-dir   [str]   REQUIRED. Input directory of first *_Hits.txt file.
     -2nd    --second-input-dir  [str]   REQUIRED. Input directory of second *_Hits.txt file.
     -out    --output-dir        [str]   Output directory. Defaults to current directory if left unspecified.
+    -d      --histo-dist        [bool]  Draw histogram of S score distribution. Default False.
+    -v      --venn-draw         [bool]  Draw venn diagram of C albicans genes with hits. Default False.
     -h      --help                      Show this help message and exit 
 '''
 
@@ -36,8 +43,12 @@ def analyze_folder(file_name_path):
     return [analyze_hits(hits, alb_db, 10000).values() 
             for hits in all_hits]
         
-def compare_two_analyzed_datasets(first_name, first_dataset, second_name, second_dataset, out_dir):
+def compare_two_analyzed_datasets(first_name, first_dataset, second_name, second_dataset, out_dir, venn_draw):
     combined_dataset = []
+
+    first_only = 0
+    second_only = 0
+    intersection = 0
     
     for r1, r2 in zip(first_dataset, second_dataset):
         assert r1['feature'] == r2['feature']
@@ -54,6 +65,14 @@ def compare_two_analyzed_datasets(first_name, first_dataset, second_name, second
         combined_record["hits_second"] = r2["hits"]
         
         combined_record["s_score"] = r2["s_value"] - r1["s_value"]
+
+        if venn_draw:
+            if r1['hits'] > 0 and r2['hits'] == 0:
+                first_only += 1 
+            elif r1['hits'] == 0 and r2['hits'] > 0:
+                second_only += 1 
+            elif r1['hits'] > 0 and r2['hits'] > 0:
+                intersection +=1 
               
     cols_config = [
         {
@@ -130,11 +149,30 @@ def compare_two_analyzed_datasets(first_name, first_dataset, second_name, second
     ]
     
     out_name = "s_score_analysis.%s_vs_%s.csv" % (first_name, second_name)
-    
+ 
     write_data_to_csv(combined_dataset, cols_config, os.path.join(out_dir, out_name))
-    
+    if venn_draw: return first_only, second_only, intersection
 
+def draw_venn_diag(venn_dataset, first_name, second_name, out_dir):
+    venn2(subsets=(venn_dataset[0], venn_dataset[1], venn_dataset[2]), 
+            set_labels = (first_name, second_name))
     
+    plt.title('$C.$ $albicans$ genes with hits')
+    plt.savefig(os.path.join(out_dir, 'venn_diag.%s_and_%s.png' % (first_name, second_name)))
+    plt.close()
+    
+def plot_s_scores(first_name, first_dataset, second_name, second_dataset, out_dir):
+    histogram_values = [r2['s_value'] - r1['s_value'] 
+                    for r1, r2 in zip(first_dataset, second_dataset)
+                        if r1['reads'] > 0 and r2['reads'] > 0]    
+
+    plt.hist(histogram_values, bins=5*16, range=(-8,8))
+    plt.title('S score distributions in\n%s vs %s' % (first_name, second_name))
+    plt.xlabel('S scores ($\Delta$ of log$_2$(reads) in a feature)')
+    plt.ylabel('Number of features')
+
+    plt.savefig(os.path.join(out_dir, 's_score_dist.%s_vs_%s.png' % (first_name, second_name)))
+    plt.close()
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(usage=usage)
@@ -142,12 +180,16 @@ if __name__ == '__main__':
     parser.add_argument("-1st", "--first-input-dir", required=True)
     parser.add_argument("-2nd", "--second-input-dir", required=True)
     parser.add_argument("-out", "--output-dir", default='.')
+    parser.add_argument("-d", "--histo-dist", default=False, action='store_true')
+    parser.add_argument("-v", "--venn-draw", default=False, action='store_true')
     
     args = parser.parse_args()
     
     first_input_dir = args.first_input_dir
     second_input_dir = args.second_input_dir
     output_dir = args.output_dir
+    histo_dist = args.histo_dist
+    venn_draw = args.venn_draw
     
     Shared.make_dir(output_dir)
        
@@ -161,4 +203,14 @@ if __name__ == '__main__':
     second_analyzed_tupled = analyze_folder(second_name_path)
     second_analyzed_dataset = second_analyzed_tupled[0]
 
-    compare_two_analyzed_datasets(first_name, first_analyzed_dataset, second_name, second_analyzed_dataset, output_dir)  
+    if venn_draw:
+        venn_data = compare_two_analyzed_datasets(first_name, first_analyzed_dataset, second_name, second_analyzed_dataset, 
+            output_dir, venn_draw)    
+        draw_venn_diag(venn_data, first_name, second_name, output_dir)
+
+    else:
+        compare_two_analyzed_datasets(first_name, first_analyzed_dataset, second_name, second_analyzed_dataset, 
+            output_dir, venn_draw)            
+
+    if histo_dist:
+        plot_s_scores(first_name, first_analyzed_dataset, second_name, second_analyzed_dataset, output_dir)
