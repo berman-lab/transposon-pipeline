@@ -8,10 +8,12 @@ usage = '''MapFastq.py
    -a  --clean-adapters     [bool]  Clean Illumina universal adapters.
    -d  --delete-originals   [bool]  Delete input FASTQ files.
    -k  --keep-clean-fqs     [bool]  Keep the cleaned FASTQ files.
+   -t  --tail-remove        [bool]  Search for transposon by transposon-specific seq only (vs primer plus transposon seq). Use if percent transposon in reads is low.
    -h  --help                       Show this help message and exit 
 '''
 
 TnPrimerAndTail = 'GTATTTTACCGACCGTTACCGACCGTTTTCATCCCTA'
+TnTailOnly = 'GTTTTCATCCCTA'
 AdapterSeq = 'AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC'
 
 # NB: bowtie2 requires spaces to be escapes with a backslash for the -x parameter.
@@ -75,6 +77,7 @@ if __name__ == '__main__':
     parser.add_argument("-a", "--clean-adapters", default=False, action='store_true')
     parser.add_argument("-d", "--delete-originals", default=False, action='store_true')
     parser.add_argument("-k", "--keep-clean-fastqs", default=False, action='store_true')
+    parser.add_argument("-t", "--tail_remove", default=Fault, action='store_true')
     
     args = parser.parse_args()
     
@@ -83,20 +86,26 @@ if __name__ == '__main__':
     clean_adapters = args.clean_adapters
     delete_originals = args.delete_originals
     keep_clean_fqs = args.keep_clean_fastqs
+    tail_remove = args.tail_remove
     
     LogFile = open('log.txt', 'w+')
     CutAdaptPath = GetCmdPath('cutadapt') 
     BowtiePath = GetCmdPath('bowtie2')
     
-    # NB: we're first removing the transposon head from the beginning and then 
-    # removing the adapter. This is because the sequencing tech, for whatever reason,
-    # removes the adapater from the 5' Tn end, but keeps the tail adapters (sometimes),
-    # presumably if the reads are too short.
-    # After we have all of the reads that have a transposon, we then trim the adapter from the tail.
-    CleanfName = os.path.join(OutputDir, os.path.basename(FastqFName) + '.clean.fq')    
-    CurrRes = RemoveTn(FastqFName, TnPrimerAndTail, 37, CleanfName)
-    Log = '=== Transposon removal ===\r\n%s reads; of these:\r\n  %s (%s%%) contained the transposon' % (CurrRes[0], CurrRes[1], CurrRes[2])
-    LogFile.write(Log)
+    # First removing the transposon head from the beginning and then removing the adapter. This is because the sequencing tech, for whatever reason,
+    # removes the adapater from the 5' Tn end, but keeps the tail adapters (sometimes), presumably if the reads are too short.  After we have all of the reads 
+    # that have a transposon, we then trim the adapter from the tail. 
+
+    if tail_remove:
+        CleanfName = os.path.join(OutputDir, os.path.basename(FastqFName) + '.clean.fq')    
+        CurrRes = RemoveTn(FastqFName, TnTailOnly, 13, CleanfName)
+        Log = '=== Transposon removal (searched w/o primer) ===\r\n%s reads; of these:\r\n  %s (%s%%) contained the transposon' % (CurrRes[0], CurrRes[1], CurrRes[2])
+        LogFile.write(Log)
+    else:
+        CleanfName = os.path.join(OutputDir, os.path.basename(FastqFName) + '.clean.fq')    
+        CurrRes = RemoveTn(FastqFName, TnPrimerAndTail, 37, CleanfName)
+        Log = '=== Transposon removal (searched with primer) ===\r\n%s reads; of these:\r\n  %s (%s%%) contained the transposon' % (CurrRes[0], CurrRes[1], CurrRes[2])
+        LogFile.write(Log)
     
     if clean_adapters:
         temp_fq = CleanfName + ".no_adapters.fq"
