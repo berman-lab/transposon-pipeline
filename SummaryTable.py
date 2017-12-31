@@ -22,6 +22,7 @@ usage = '''SummaryTable.py
     -i  --input_dir             [str]   Input directory of '*_Hits.txt'. Defaults to current directory if left unspecified.
     -o  --output-dir            [str]   Output directory for results. Defaults to current directory if left unspecified.
     -f  --read-depth-filter     [str]   Read depth below which insertion events will be ignored. Default is 1
+    -c  --correlations          [bool]  Perform pairwise correlations. Default is false
     -h  --help                          Show this help message and exit 
 '''
 
@@ -1285,11 +1286,13 @@ if __name__ == "__main__":
     parser.add_argument("-i", "--input-dir", default='.')
     parser.add_argument("-o", "--output-dir", default='.')
     parser.add_argument("-f", "--read-depth-filter", type=int, default=1)
+    parser.add_argument("-c", "--correlations", default=False, action='store_true')
     args = parser.parse_args()
     
     input_dir = args.input_dir
     output_dir = args.output_dir
     read_depth_filter = args.read_depth_filter
+    correlations = args.correlations
     
     Shared.make_dir(output_dir)
     
@@ -1392,9 +1395,10 @@ if __name__ == "__main__":
         draw_chrom_map(read_map, bin_size, "Reads/10000 bps", 100000, os.path.join(output_dir, "read_map.%s.png" % fname))
     
     # More correlations than you can shake a stick at:
-    perform_pairwise_correlations(input_filenames,
-                                  [a.values() for a in all_analyzed],
-                                  os.path.join(output_dir, "correlations"))
+    if correlations:
+        perform_pairwise_correlations(input_filenames,
+                                    [a.values() for a in all_analyzed],
+                                    os.path.join(output_dir, "correlations"))
     
     for fname, analysis in zip(input_filenames, all_analyzed):
         write_analyzed_alb_records(analysis.values(), os.path.join(output_dir, fname + "_analysis.csv"))

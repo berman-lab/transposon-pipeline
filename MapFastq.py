@@ -77,7 +77,7 @@ if __name__ == '__main__':
     parser.add_argument("-a", "--clean-adapters", default=False, action='store_true')
     parser.add_argument("-d", "--delete-originals", default=False, action='store_true')
     parser.add_argument("-k", "--keep-clean-fastqs", default=False, action='store_true')
-    parser.add_argument("-t", "--tail_remove", default=Fault, action='store_true')
+    parser.add_argument("-t", "--tail_remove", default=False, action='store_true')
     
     args = parser.parse_args()
     
