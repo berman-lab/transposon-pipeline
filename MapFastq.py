@@ -18,20 +18,63 @@ AdapterSeq = 'AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC'
 
 # NB: bowtie2 requires spaces to be escapes with a backslash for the -x parameter.
 CInd = Shared.get_dependency("albicans", "reference genome", "C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes_HapA").replace(' ', '\ ')
-CORES = 4 # How many cores on the machine = how many threads should the external tools utilize
+CORES = 4 # Cores on the machine = how many threads should the external tools utilize
 
 def GetCmdPath(Program):
+    """Gets the path to a desired program file on given computer.
+
+    Parameters
+    ----------
+        Program :   string  
+            Name of program wish to have path for.
+
+    Returns
+    -------
+        CmdPath :   string
+            Path for calling program as a command in the POSIX terminal.
+    """
     ShellPath = os.popen('command -v ' + Program).read()
     CmdPath = ShellPath.strip('\n')
     return CmdPath
 
 def GetReads(Val,Text):
+    """Gets number of reads found in given subcategory of output.
+
+    Parameters
+    ----------
+        Val :   string
+            Substring in which to find read number value.
+        Text    :   string
+            Search term for part of file to find substrings in.
+
+    Returns
+    -------
+        integer value of read number
+    """
     Sub = Text[Text.find(Val)+len(Val)+1:].lstrip(' ')
     Sub = Sub[:Sub.find('\n')]
     Vals = Sub.split(' ')
     return int(Vals[0].replace(',',''))
-    
+
+# NOTE: Check if using strict edge or not. Try running with different error to see number of reads    
 def CutAdaptOutput(output):
+    """Gets desired numerical values from CutAdapt program output.
+
+    Parameters
+    ----------
+        output  :   string
+            String output by CutAdapt program when run.
+
+    Returns
+    -------
+        list of integers and float
+            TotalRead : first element, int
+                Total number of reads processed by CutAdapt.
+            TotalWrite  :   second element, int
+                Total number of reads written by CutAdapt (aka number of reads that passed filter requirements)
+            Percent :   third element, float
+                Percentage of total reads processed which passed filters
+    """
     Summary = output[output.find('=== Summary ===')+17:]
     TotalRead = GetReads('Total read pairs processed',Summary)
     TotalWrite = GetReads('Reads written (passing filters)',Summary)
@@ -40,6 +83,17 @@ def CutAdaptOutput(output):
     return TotalRead, TotalWrite, Percent
 
 def cmdline(command):
+    """Takes text of command and has shell process it.
+
+    Parameters
+    ----------
+        command :   string
+            Text of command that needs to be processed by the POSIX shell.
+
+    Returns
+    -------
+        Processes command to shell.
+    """
     process = Popen(
         args=command,
         stdout=PIPE,
@@ -47,16 +101,58 @@ def cmdline(command):
     )
     return process.communicate()
 
-def RemoveTn(InputFName, TnSeq, overlap, OutputFName):
-    #-g is from the beggining and -a is from the end or vice versa (if we use -a we get only a string length 6, which is probably the 6 Ns between the primer and Tn)
-    #-o out put, afterwards the input. --overlap determines the minimal number of bases found from the Tn
-    CutAdaptCmd = CutAdaptPath + ' -m 2 -g ' + TnSeq + ' -o "'+ OutputFName + '" "' + InputFName + '" --discard-untrimmed --overlap ' + str(overlap)
+def RemoveTn(InputFName, TnSeq, overlap, CleanfName):
+    """Locates reads with transposon and removes from 5' end using CutAdapt.
+
+    Parameters - RemoveTn
+    ---------------------
+        InputFName  :   string
+            Input filename
+        TnSeq   :   string
+            Sequence to find and remove
+        overlap :   integer
+            Length of sequence above
+        CleanfName :   string
+            Output filename for temperorary fq file created by program
+
+    Parameters - CutAdapt
+    ---------------------
+        -g  :   from the beginning
+        -a  :   from the end or vice versa
+            if we use -a we get only a string length 6, which is probably the 6 Ns between the primer and Tn
+        -o  :   output then input
+        --overlap   : determines the minimal number of bases found from the Tn
+
+    Returns
+    -------
+        CutAdaptOutput's list of integers and float
+    """
+    CutAdaptCmd = CutAdaptPath + ' -m 2 -g ' + TnSeq + ' -o "'+ CleanfName + '" "' + InputFName + '" --discard-untrimmed --overlap ' + str(overlap)
     Output,err = cmdline(CutAdaptCmd)
     return CutAdaptOutput(Output)
 
 def AlignFastq(BowtiePath, CleanfName, SamfName):
-    #aligning fastq file to the reference genome
-    #-x reference_genome; -U fq file of unpaired reads; -S output SAM alignment file; X is the max fragment size to consider (relevant only in paired end)
+    """Run Bowtie2 alignment of the reads from the fastq file to the reference genome.
+
+    Parameters - AlignFastq
+    -----------------------
+        BowtiePath  :   string
+            Path to Bowtie2 program on computer
+        CleanfName  :   string
+            Output filename for temperorary fq file created by program
+        SamfName    :   string
+
+    Parameters - Bowtie
+    -------------------
+        -x  :   reference genome
+        -U  :   fq file of unpaired reads
+        -S  :   output SAM alignment file
+        X   :   max fragment size to consider (relevant only in paired end)
+
+    Writes
+    ------
+        string of text into logfile giving sequence alignment information
+    """
     BowtieCmd = BowtiePath + ' -p ' + str(CORES) + ' -x "'+ CInd + \
                 '" -U "' + CleanfName + '" -S "' + SamfName + '" 2> temp'
     Output,err = cmdline(BowtieCmd)
@@ -95,14 +191,13 @@ if __name__ == '__main__':
     # First removing the transposon head from the beginning and then removing the adapter. This is because the sequencing tech, for whatever reason,
     # removes the adapater from the 5' Tn end, but keeps the tail adapters (sometimes), presumably if the reads are too short.  After we have all of the reads 
     # that have a transposon, we then trim the adapter from the tail. 
-
-    if tail_remove:
-        CleanfName = os.path.join(OutputDir, os.path.basename(FastqFName) + '.clean.fq')    
+    CleanfName = os.path.join(OutputDir, os.path.basename(FastqFName) + '.clean.fq') 
+ 
+    if tail_remove:  
         CurrRes = RemoveTn(FastqFName, TnTailOnly, 13, CleanfName)
         Log = '=== Transposon removal (searched w/o primer) ===\r\n%s reads; of these:\r\n  %s (%s%%) contained the transposon' % (CurrRes[0], CurrRes[1], CurrRes[2])
         LogFile.write(Log)
-    else:
-        CleanfName = os.path.join(OutputDir, os.path.basename(FastqFName) + '.clean.fq')    
+    else:   
         CurrRes = RemoveTn(FastqFName, TnPrimerAndTail, 37, CleanfName)
         Log = '=== Transposon removal (searched with primer) ===\r\n%s reads; of these:\r\n  %s (%s%%) contained the transposon' % (CurrRes[0], CurrRes[1], CurrRes[2])
         LogFile.write(Log)
@@ -117,8 +212,7 @@ if __name__ == '__main__':
         os.unlink(CleanfName)
         os.rename(temp_fq, CleanfName)
 
-    #aligning fastq file to the reference genome
-    #-x reference_genome; -U fq file of unpaired reads; -S output SAM alignment file; X is the max fragment size to consider (relevant only in paired end)        
+    # aligning fastq file to the reference genome      
     SamfName = os.path.join(OutputDir, os.path.splitext(os.path.basename(FastqFName))[0] + '.sam')
     AlignFastq(BowtiePath, CleanfName, SamfName)
     
@@ -126,7 +220,7 @@ if __name__ == '__main__':
     cmdline('samtools view -@ ' + str(CORES) + ' -bS "'+ SamfName + '" > "' +
             os.path.splitext(SamfName)[0] + '.bam"')
             
-    #sorting and indexing 
+    # sorting and indexing 
     cmdline('samtools sort -@ ' + str(CORES) + ' "' +
             os.path.splitext(SamfName)[0] + '.bam" > "' +
             os.path.splitext(SamfName)[0] + '.sorted.bam"')
@@ -136,7 +230,7 @@ if __name__ == '__main__':
     print LogFile.read()
     LogFile.close()
 
-    # Remove intermediats:
+    # remove intermediates:
     if delete_originals:
         os.remove(FastqFName)
     if not keep_clean_fqs:

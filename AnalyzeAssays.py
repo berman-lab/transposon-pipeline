@@ -1,6 +1,4 @@
-# A module based on "ExperimentCoparison.py"
-# Hopefully useable in a more universal way.
-# Need help with ven diagram stuff
+# A module to compare and analyze two assays
 
 import os
 import argparse
@@ -26,6 +24,19 @@ usage = '''AnalyzeAssays.py
 RDF = 1 # read depth filter
 
 def get_filename_path(folder):
+    """Gets path and filename for hits file
+
+    Parameters
+    ----------
+    folder  :   string
+        An directory path as input when running the program
+
+    Returns
+    -------
+    list
+        filename for hits file as first element, 
+        filepath for hits file as second element
+    """
     file_paths = glob.glob(os.path.join(folder, "*_Hits.txt"))
     filenames = [os.path.split(file_path)[-1][:-22] for file_path in file_paths]
 
@@ -35,6 +46,31 @@ def get_filename_path(folder):
     return filename, file_path
 
 def analyze_folder(file_name_path):
+    """Runs analyze_hits from SummaryTable using output from get_filename_path
+
+    Parameters
+    ----------
+    file_name_path  :  list 
+        The hits file filename and filepath as elements 0 and 1 respectively 
+
+    Returns
+    -------
+    dict of dicts
+        A map of standard feature names to its all_analyzed results. The results
+        themselves are represented as a dict of str to object. For example:
+        
+        {
+            "C2_":
+                {
+                    "feature": the_feature_object,
+                    "hits": 24,
+                    "reads": 5064,
+                    ... 
+                }
+            ...,
+        }
+
+    """
     file_path = [file_name_path[1]]
     filenames = [file_name_path[0]]
 
@@ -44,6 +80,34 @@ def analyze_folder(file_name_path):
             for hits in all_hits]
         
 def compare_two_analyzed_datasets(first_name, first_dataset, second_name, second_dataset, out_dir, venn_draw):
+    """Creates and writes combined record for two input datasets, and optionally gets hit data for Venn diagram
+
+    Parameters
+    ----------
+    *_name  : string
+        Filename for first or second input hits file directory
+    *_dataset   :   dict of dicts
+        Map of standard feature names to analyzed results for first or second input
+    out_dir :   string
+        Name for output directory
+    venn_draw   :   boolean
+        Setting for whether or not to draw Venn diagram.
+
+    Writes
+    ------
+    s_score_analysi.[first_name]_vs_[second_name].csv   :   csv file
+        Combined record with statistical analysis for two inputs in form of .csv file.
+
+    Returns (optional)
+    -------
+    list of integers
+        first_only  :   first element of list
+            Number of genes with hits in the first dataset that were not hit in the second
+        second_only :   second element
+            Number of genes with hits in the second dataset that were not hit in the first
+        intersection    :   third element
+            Number of genes with hits in both datassets.
+    """
     combined_dataset = []
 
     first_only = 0
@@ -154,6 +218,24 @@ def compare_two_analyzed_datasets(first_name, first_dataset, second_name, second
     if venn_draw: return first_only, second_only, intersection
 
 def draw_venn_diag(venn_dataset, first_name, second_name, out_dir):
+    """Draws Venn diagram comparing genes hit in each dataset.
+
+    Parameters
+    ----------
+    venn_dataset    :   list of integers
+        First element   :   Number of genes with hits in first dataset only
+        Second element  :   Number of genes with hits in second dataset only
+        Third element   :   Number of genes with hits in both datasets
+    *_name  :   string
+        Filename for first or second input hits file directory
+    out_dir :   string
+        Name for output directory
+
+    Writes
+    -------
+    venn_diag.*.png :   png file
+        Venn diagram image
+    """
     venn2(subsets=(venn_dataset[0], venn_dataset[1], venn_dataset[2]), 
             set_labels = (first_name, second_name))
     
@@ -162,6 +244,22 @@ def draw_venn_diag(venn_dataset, first_name, second_name, out_dir):
     plt.close()
     
 def plot_s_scores(first_name, first_dataset, second_name, second_dataset, out_dir):
+    """Draws histogram of S score distribution
+
+    Parameters
+    ----------
+    *_name  : string
+        Filename for first or second input hits file directory
+    *_dataset   :   dict of dicts
+        Map of standard feature names to analyzed results for first or second input
+    out_dir :   string
+        Name for output directory
+
+    Writes
+    -------
+    s_score_dist.*.png  :   png file
+        Histogram of S score (difference between S values) distribution
+    """
     histogram_values = [r2['s_value'] - r1['s_value'] 
                     for r1, r2 in zip(first_dataset, second_dataset)
                         if r1['reads'] > 0 and r2['reads'] > 0]    
