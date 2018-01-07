@@ -5,10 +5,11 @@ import Shared
 usage = '''MapFastq.py  
    -o  --out-dir            [str]   Output directory. Defaults to current directory if left unspecified.
    -i  --input-file-name    [str]   REQUIRED. Input fastq file (Need to include path and .fastq.gz at end of filename)
-   -a  --clean-adapters     [bool]  Clean Illumina universal adapters.
-   -d  --delete-originals   [bool]  Delete input FASTQ files.
-   -k  --keep-clean-fqs     [bool]  Keep the cleaned FASTQ files.
-   -t  --tail-remove        [bool]  Search for transposon by transposon-specific seq only (vs primer plus transposon seq). Use if percent transposon in reads is low.
+   -a  --clean-adapters             Clean Illumina universal adapters.
+   -d  --delete-originals           Delete input FASTQ files.
+   -k  --keep-clean-fqs             Keep the cleaned FASTQ files.
+   -t  --tail-remove                Search for transposon by transposon-specific seq only (vs primer plus transposon seq). 
+                                        Use if percent transposon in reads is low.
    -h  --help                       Show this help message and exit 
 '''
 

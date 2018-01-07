@@ -22,7 +22,7 @@ usage = '''SummaryTable.py
     -i  --input_dir             [str]   Input directory of '*_Hits.txt'. Defaults to current directory if left unspecified.
     -o  --output-dir            [str]   Output directory for results. Defaults to current directory if left unspecified.
     -f  --read-depth-filter     [str]   Read depth below which insertion events will be ignored. Default is 1
-    -c  --correlations          [bool]  Perform pairwise correlations. Default is false
+    -c  --correlations                  Perform pairwise correlations.
     -h  --help                          Show this help message and exit 
 '''
 
@@ -684,7 +684,6 @@ def write_data_to_data_frame(data, cols_config):
     
     return result
 
-
 @Shared.memoized
 def get_calb_ess_in_sc():
     cer_essentials = Organisms.cer.literature_essentials
@@ -1090,11 +1089,6 @@ def draw_histogram_of_analysis(dataset, output_file_prefix):
                        "%s.%s.%.3f_%d.png" % (output_file_prefix, field_name, stop, bins),
                        bins=bins,
                        ylim=ylim)
-            
-#             with open(os.path.join(output_dir, "%s.for_matlab.%.3f_%d.txt" % (fname, stop, bins)), 'w') as out_file:
-#                 new_hist = [0 if h is 0 else h-1 for h in relative_values]
-#                 for b in range(bins):
-#                     out_file.write("%d\n" % len([h for h in new_hist if h == b]))
 
 def draw_histogram(histogram, sample_name, file_name, bins, ylim=300):
     plt.hist(histogram, bins=bins)

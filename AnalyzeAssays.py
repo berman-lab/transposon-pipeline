@@ -1,4 +1,6 @@
-# A module to compare and analyze two assays
+# A program to compare and analyze two assays
+# Should consider moving Pearson and Spearman correlation module from SummaryTable to here
+# (This would run all single-file analyses via SummaryTable, and all two-file analyses here)
 
 import os
 import argparse
@@ -16,12 +18,50 @@ usage = '''AnalyzeAssays.py
     -1st    --first-input-dir   [str]   REQUIRED. Input directory of first *_Hits.txt file.
     -2nd    --second-input-dir  [str]   REQUIRED. Input directory of second *_Hits.txt file.
     -out    --output-dir        [str]   Output directory. Defaults to current directory if left unspecified.
-    -d      --histo-dist        [bool]  Draw histogram of S score distribution. Default False.
-    -v      --venn-draw         [bool]  Draw venn diagram of C albicans genes with hits. Default False.
+    -d      --histo-dist                Draw histogram of S score distribution.
+    -v      --venn-draw                 Draw Venn diagram of C albicans genes with hits.
     -h      --help                      Show this help message and exit 
 '''
 
-RDF = 1 # read depth filter
+RDF = 1     # read depth filter
+
+def main():
+    parser = argparse.ArgumentParser(usage=usage)
+    
+    parser.add_argument("-1st", "--first-input-dir", required=True)
+    parser.add_argument("-2nd", "--second-input-dir", required=True)
+    parser.add_argument("-out", "--output-dir", default='.')
+    parser.add_argument("-d", "--histo-dist", default=False, action='store_true')
+    parser.add_argument("-v", "--venn-draw", default=False, action='store_true')
+    
+    args = parser.parse_args()
+    
+    first_input_dir = args.first_input_dir
+    second_input_dir = args.second_input_dir
+    output_dir = args.output_dir
+    histo_dist = args.histo_dist
+    venn_draw = args.venn_draw
+    correlations = args.correlations
+    
+    Shared.make_dir(output_dir)
+       
+    first_name_path = get_filename_path(first_input_dir)
+    first_name = first_name_path[0]    
+    second_name_path = get_filename_path(second_input_dir)
+    second_name = second_name_path[0]
+
+    first_analyzed_tupled = analyze_folder(first_name_path)
+    first_analyzed_dataset = first_analyzed_tupled[0]
+    second_analyzed_tupled = analyze_folder(second_name_path)
+    second_analyzed_dataset = second_analyzed_tupled[0]
+
+    data = compare_two_analyzed_datasets(first_name, first_analyzed_dataset, second_name, second_analyzed_dataset, output_dir, venn_draw, correlations)
+
+    if venn_draw:
+        draw_venn_diag(data, first_name, second_name, output_dir)
+
+    if histo_dist:
+        plot_s_scores(first_name, first_analyzed_dataset, second_name, second_analyzed_dataset, output_dir)
 
 def get_filename_path(folder):
     """Gets path and filename for hits file
@@ -79,7 +119,7 @@ def analyze_folder(file_name_path):
     return [analyze_hits(hits, alb_db, 10000).values() 
             for hits in all_hits]
         
-def compare_two_analyzed_datasets(first_name, first_dataset, second_name, second_dataset, out_dir, venn_draw):
+def compare_two_analyzed_datasets(first_name, first_dataset, second_name, second_dataset, out_dir, venn_draw): #!!!, correlations):
     """Creates and writes combined record for two input datasets, and optionally gets hit data for Venn diagram
 
     Parameters
@@ -92,6 +132,8 @@ def compare_two_analyzed_datasets(first_name, first_dataset, second_name, second
         Name for output directory
     venn_draw   :   boolean
         Setting for whether or not to draw Venn diagram.
+    correlate   :   boolean
+        Setting for whether or not to find correlation data
 
     Writes
     ------
@@ -108,14 +150,14 @@ def compare_two_analyzed_datasets(first_name, first_dataset, second_name, second
         intersection    :   third element
             Number of genes with hits in both datassets.
     """
-    combined_dataset = []
-
     first_only = 0
     second_only = 0
     intersection = 0
+
+    combined_dataset = [first_only, second_only, intersection]
     
     for r1, r2 in zip(first_dataset, second_dataset):
-        assert r1['feature'] == r2['feature']
+        assert r1['feature'] == r2['feature']   # alternately could use r1.sort(key=lambda r: r["feature"].name), r2.sort(etc.)
         
         combined_record = dict(r1)
         combined_dataset.append(combined_record)
@@ -137,7 +179,7 @@ def compare_two_analyzed_datasets(first_name, first_dataset, second_name, second
                 second_only += 1 
             elif r1['hits'] > 0 and r2['hits'] > 0:
                 intersection +=1 
-              
+          
     cols_config = [
         {
             "field_name": "feature",
@@ -273,42 +315,4 @@ def plot_s_scores(first_name, first_dataset, second_name, second_dataset, out_di
     plt.close()
     
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(usage=usage)
-    
-    parser.add_argument("-1st", "--first-input-dir", required=True)
-    parser.add_argument("-2nd", "--second-input-dir", required=True)
-    parser.add_argument("-out", "--output-dir", default='.')
-    parser.add_argument("-d", "--histo-dist", default=False, action='store_true')
-    parser.add_argument("-v", "--venn-draw", default=False, action='store_true')
-    
-    args = parser.parse_args()
-    
-    first_input_dir = args.first_input_dir
-    second_input_dir = args.second_input_dir
-    output_dir = args.output_dir
-    histo_dist = args.histo_dist
-    venn_draw = args.venn_draw
-    
-    Shared.make_dir(output_dir)
-       
-    first_name_path = get_filename_path(first_input_dir)
-    first_name = first_name_path[0]    
-    second_name_path = get_filename_path(second_input_dir)
-    second_name = second_name_path[0]
-
-    first_analyzed_tupled = analyze_folder(first_name_path)
-    first_analyzed_dataset = first_analyzed_tupled[0]
-    second_analyzed_tupled = analyze_folder(second_name_path)
-    second_analyzed_dataset = second_analyzed_tupled[0]
-
-    if venn_draw:
-        venn_data = compare_two_analyzed_datasets(first_name, first_analyzed_dataset, second_name, second_analyzed_dataset, 
-            output_dir, venn_draw)    
-        draw_venn_diag(venn_data, first_name, second_name, output_dir)
-
-    else:
-        compare_two_analyzed_datasets(first_name, first_analyzed_dataset, second_name, second_analyzed_dataset, 
-            output_dir, venn_draw)            
-
-    if histo_dist:
-        plot_s_scores(first_name, first_analyzed_dataset, second_name, second_analyzed_dataset, output_dir)
+    main()
