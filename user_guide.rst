@@ -24,25 +24,22 @@ Required Python packages (dependencies) from outside the standard library can be
 
 1.2.1 Dependencies
 ``````````````````
-..hlist::
-    :columns: 2
-
-    * Bio
-    * cairocffi
-    * cPickle
-    * gffutils
-    * matplotlib
-    * matplotlib-venn
-    * numpy
-    * pandas
-    * pysam
-    * scipy
-    * sklearn
+* Bio
+* cairocffi
+* cPickle
+* gffutils
+* matplotlib
+* matplotlib-venn
+* numpy
+* pandas
+* pysam
+* scipy
+* sklearn
 
 
 1.3 Workflow
 ------------
-.. image:: imageneeded
+.. image:: workflow.png
 
 
 2 MapFastq.py
