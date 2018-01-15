@@ -37,7 +37,7 @@ def FindHitsPerSample(SamAlign, ChrFeatMap, Sep0N = 2,MapQ=10):
 
     Returns
     -------
-        List of ??
+        List of lists (?)
             ChrHitList  :   x 
             TotalHits   :   x 
             TotalUniqueHits :   x 
@@ -309,10 +309,16 @@ if __name__ == '__main__':
     
     # SAM is 1-based and BAM is 0-based, so we work with BAM only out of convenience.
     fNames = glob.glob(os.path.join(SamFileDir, '*.bam'))
-    #going over all sam files in a given directory and for each creating a hit file, by uniting close hits and check thier nearest ORFS
+
+    #going over all sam files in a given directory and for each creating a hit file, by uniting close hits and check their nearest ORFS
     for Name in fNames:
         BaseName = os.path.basename(Name)
-        OutFileName = os.path.join(GeneListFileDir, BaseName[:-4] + '_Hits.txt')
+        if BaseName.find(".sorted") == -1:
+            continue
+        else:
+            BaseName = BaseName[:-7]
+        PrefixName = BaseName[:-4]
+        OutFileName = os.path.join(GeneListFileDir, PrefixName + '_hits.txt')
         if os.path.isfile(OutFileName): 
         #check first if the file already exists as it is very time consuming. if we want to re create the hit file, just delete or rename it
             print 'ERROR: Hit file for %s already exists.' % (BaseName)
@@ -327,6 +333,6 @@ if __name__ == '__main__':
         Log = '\r\n=== Finding hits ===\r\n%s reads found of map quality >= %s; in these:\r\n  %s hits were found; of these:\r\n    %s (%s%%) hit positions were found to be unique (Minimal distance = %s)\r\n' % (TotalReads, MapQ, TotalHits, TotalUniqueHits, UniqueHitPercent, MergeDist)
         print Log
         
-        LogFile = open('log.txt', 'a')
+        LogFile = open('%s_log.txt' % (PrefixName), 'a')
         LogFile.write(Log)
         LogFile.close()

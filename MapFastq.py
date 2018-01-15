@@ -8,13 +8,12 @@ usage = '''MapFastq.py
    -a  --clean-adapters             Clean Illumina universal adapters.
    -d  --delete-originals           Delete input FASTQ files.
    -k  --keep-clean-fqs             Keep the cleaned FASTQ files.
-   -t  --tail-remove                Search for transposon by transposon-specific seq only (vs primer plus transposon seq). 
-                                        Use if percent transposon in reads is low.
+   -p  --primer-check               Check primer specificity if percent transposon in reads is low.
    -h  --help                       Show this help message and exit 
 '''
 
 TnPrimerAndTail = 'GTATTTTACCGACCGTTACCGACCGTTTTCATCCCTA'
-TnTailOnly = 'GTTTTCATCCCTA'
+PrimerOnly = 'GTATTTTACCGACCGTTACCGACC'
 AdapterSeq = 'AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC'
 
 # NB: bowtie2 requires spaces to be escapes with a backslash for the -x parameter.
@@ -140,7 +139,7 @@ def AlignFastq(BowtiePath, CleanfName, SamfName):
         BowtiePath  :   string
             Path to Bowtie2 program on computer
         CleanfName  :   string
-            Output filename for temperorary fq file created by program
+            Output filename for temporary fq file created by program
         SamfName    :   string
 
     Parameters - Bowtie
@@ -174,7 +173,7 @@ if __name__ == '__main__':
     parser.add_argument("-a", "--clean-adapters", default=False, action='store_true')
     parser.add_argument("-d", "--delete-originals", default=False, action='store_true')
     parser.add_argument("-k", "--keep-clean-fastqs", default=False, action='store_true')
-    parser.add_argument("-t", "--tail_remove", default=False, action='store_true')
+    parser.add_argument("-p", "--primer_check", default=False, action='store_true')
     
     args = parser.parse_args()
     
@@ -183,24 +182,25 @@ if __name__ == '__main__':
     clean_adapters = args.clean_adapters
     delete_originals = args.delete_originals
     keep_clean_fqs = args.keep_clean_fastqs
-    tail_remove = args.tail_remove
+    primer_check = args.primer_check
+    PrefixName = FastqFName[:-9]
     
-    LogFile = open('log.txt', 'w+')
+    LogFile = open('%s_log.txt' % (PrefixName), 'w+')
     CutAdaptPath = GetCmdPath('cutadapt') 
     BowtiePath = GetCmdPath('bowtie2')
     
     # First removing the transposon head from the beginning and then removing the adapter. This is because the sequencing tech, for whatever reason,
     # removes the adapater from the 5' Tn end, but keeps the tail adapters (sometimes), presumably if the reads are too short.  After we have all of the reads 
     # that have a transposon, we then trim the adapter from the tail. 
-    CleanfName = os.path.join(OutputDir, os.path.basename(FastqFName) + '.clean.fq') 
+    CleanfName = os.path.join(OutputDir, os.path.basename(PrefixName) + '.clean.fq') 
  
-    if tail_remove:  
-        CurrRes = RemoveTn(FastqFName, TnTailOnly, 13, CleanfName)
-        Log = '=== Transposon removal (searched w/o primer) ===\r\n%s reads; of these:\r\n  %s (%s%%) contained the transposon' % (CurrRes[0], CurrRes[1], CurrRes[2])
+    if primer_check:  
+        CurrRes = RemoveTn(FastqFName, PrimerOnly, 24, CleanfName)
+        Log = '=== Primer removal (searched w/o Tn tail) ===\r\n%s reads; of these:\r\n  %s (%s%%) contained the primer' % (CurrRes[0], CurrRes[1], CurrRes[2])
         LogFile.write(Log)
     else:   
         CurrRes = RemoveTn(FastqFName, TnPrimerAndTail, 37, CleanfName)
-        Log = '=== Transposon removal (searched with primer) ===\r\n%s reads; of these:\r\n  %s (%s%%) contained the transposon' % (CurrRes[0], CurrRes[1], CurrRes[2])
+        Log = '=== Transposon removal (searched with primer+Tn tail) ===\r\n%s reads; of these:\r\n  %s (%s%%) contained the transposon' % (CurrRes[0], CurrRes[1], CurrRes[2])
         LogFile.write(Log)
     
     if clean_adapters:
@@ -214,7 +214,7 @@ if __name__ == '__main__':
         os.rename(temp_fq, CleanfName)
 
     # aligning fastq file to the reference genome      
-    SamfName = os.path.join(OutputDir, os.path.splitext(os.path.basename(FastqFName))[0] + '.sam')
+    SamfName = os.path.join(OutputDir, os.path.splitext(os.path.basename(PrefixName))[0] + '.sam')
     AlignFastq(BowtiePath, CleanfName, SamfName)
     
     # converting to bam file 

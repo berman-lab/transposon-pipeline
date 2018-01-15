@@ -22,7 +22,7 @@ usage = '''SummaryTable.py
     -i  --input_dir             [str]   Input directory of '*_Hits.txt'. Defaults to current directory if left unspecified.
     -o  --output-dir            [str]   Output directory for results. Defaults to current directory if left unspecified.
     -f  --read-depth-filter     [str]   Read depth below which insertion events will be ignored. Default is 1
-    -c  --correlations                  Perform pairwise correlations.
+    -p  --pairwise-correlations                  Perform pairwise correlations. (Requires multiple hit files.)
     -h  --help                          Show this help message and exit 
 '''
 
@@ -1078,7 +1078,7 @@ def draw_histogram_of_analysis(dataset, output_file_prefix):
         relative_values = [min(bins, int(bins*(r[field_name] - start)/(stop - start))) for r in dataset.values() if r["hits"] > 0]
         zero_outliers = len([r for r in dataset.values() if r["hits"] == 0])
         right_tail_outliers = len([v for v in relative_values if v == bins])
-        with open(output_file_prefix + "_outlier_stats.txt", 'w') as out_file:
+        with open(output_file_prefix + ".outlier_stats.txt", 'w') as out_file:
             out_file.write(" ".join(str(o) for o in (field_name, zero_outliers, right_tail_outliers)))
         relative_values = [v for v in relative_values if v < bins] # Clip the long-tail end
         # Should we include the 0 outliers?
@@ -1280,13 +1280,13 @@ if __name__ == "__main__":
     parser.add_argument("-i", "--input-dir", default='.')
     parser.add_argument("-o", "--output-dir", default='.')
     parser.add_argument("-f", "--read-depth-filter", type=int, default=1)
-    parser.add_argument("-c", "--correlations", default=False, action='store_true')
+    parser.add_argument("-c", "--pairwise-correlations", default=False, action='store_true')
     args = parser.parse_args()
     
     input_dir = args.input_dir
     output_dir = args.output_dir
     read_depth_filter = args.read_depth_filter
-    correlations = args.correlations
+    pairwise_correlations = args.pairwise_correlations
     
     Shared.make_dir(output_dir)
     
@@ -1296,7 +1296,7 @@ if __name__ == "__main__":
     input_filenames = [os.path.split(file_path)[-1][:-9] for file_path in input_file_paths]
     
     all_hits = read_hit_files(input_file_paths, read_depth_filter)
-    
+
     # Write per-bin hits and reads, for 3D analysis:
     bin_size = 10000
     # [hits, reads, hit rank, read rank]
@@ -1313,7 +1313,8 @@ if __name__ == "__main__":
     for fname_hit_read_bins in hit_read_bins.values():
         for bin_rank, bin_data in enumerate(sorted(chain(*fname_hit_read_bins.values()), key=lambda b: b[0], reverse=True)):
             bin_data[2] = bin_rank+1
-            
+    
+    # Create binned_hits file (one table for all datasets):
     with open(os.path.join(output_dir, "binned_hits.RDF_%d.csv" % read_depth_filter), "w") as out_file:
         writer = csv.writer(out_file)
         writer.writerow(["Bin index"] + list(chain(*zip(input_filenames, ["%s rank" % fname for fname in input_filenames]))))
@@ -1335,7 +1336,7 @@ if __name__ == "__main__":
             writer.writerow([feature.standard_name, feature.common_name] +
                             [r["hits"] for r in record_row])
     
-    # Write a table of reads-per-hit for each dataset:
+    # Write a table of reads-per-hit (one for each dataset):
     for fname, hits in zip(input_filenames, all_hits):
         # Transform:
         sum_hits = {chrom.name: {} for chrom in alb_db}
@@ -1343,7 +1344,7 @@ if __name__ == "__main__":
             sum_hits[h["chrom"]][h["hit_pos"]] = sum_hits[h["chrom"]].get(h["hit_pos"], 0) + h["hit_count"] 
             
         # Write out:
-        with open(os.path.join(output_dir, "all_hits.%s.csv" % fname), 'w') as out_file:
+        with open(os.path.join(output_dir, "%s.all_hits.csv" % fname), 'w') as out_file:
             writer = csv.writer(out_file)
             writer.writerow(["Chromosome", "Position", "Reads"])
             for chrom, data in sorted(sum_hits.items()):
@@ -1356,7 +1357,7 @@ if __name__ == "__main__":
         plt.title("Read distribution per hit in %s" % fname)
         plt.xlabel("log10 of # of reads per hit")
         plt.ylabel("# of hits")
-        plt.savefig(os.path.join(output_dir, "reads_distribution.hits.log10.%s.rdf_%d.png" % (fname, read_depth_filter)))
+        plt.savefig(os.path.join(output_dir, "%s.reads_distribution.hits.log10.rdf_%d.png" % (fname, read_depth_filter)))
         plt.close()
     
     # Plot the read distributions per gene:
@@ -1366,7 +1367,7 @@ if __name__ == "__main__":
         plt.title("Read distribution per feature in %s" % fname)
         plt.xlabel("log10 of # of reads per feature")
         plt.ylabel("# of features")
-        plt.savefig(os.path.join(output_dir, "reads_distribution.log10.%s.rdf_%d.png" % (fname, read_depth_filter)))
+        plt.savefig(os.path.join(output_dir, "%s.reads_distribution.log10.rdf_%d.png" % (fname, read_depth_filter)))
         plt.close()
     
     # Plot the hit and read chromosomal maps:
@@ -1383,13 +1384,14 @@ if __name__ == "__main__":
         max_hits = int( round(max(all_hits_sorted), -2) + 100 )
         bottom_cut = int( round(all_hits_sorted[int(len(all_hits_sorted) * 0.5)], -2) + 100 )
         bottom_cut = min(map(max, hit_map.values())) / 100 * 100 + 100
-        draw_chrom_map(hit_map, bin_size, "Hits/10000 bps", bottom_cut, os.path.join(output_dir, "hit_map.%s.png" % fname))
+        draw_chrom_map(hit_map, bin_size, "Hits/10000 bps", bottom_cut, os.path.join(output_dir, "%s.hit_map.png" % fname))
           
-        draw_chrom_map(log_read_map, bin_size, "Log10 reads/10000 bps", 7, os.path.join(output_dir, "log10_read_map.%s.png" % fname))
-        draw_chrom_map(read_map, bin_size, "Reads/10000 bps", 100000, os.path.join(output_dir, "read_map.%s.png" % fname))
+        draw_chrom_map(log_read_map, bin_size, "Log10 reads/10000 bps", 7, os.path.join(output_dir, "%s.log10_read_map.png" % fname))
+        draw_chrom_map(read_map, bin_size, "Reads/10000 bps", 100000, os.path.join(output_dir, "%s.read_map.png" % fname))
     
     # More correlations than you can shake a stick at:
-    if correlations:
+    #   This first set can only be calculated if have multiple files, the rest do not require that
+    if pairwise_correlations:
         perform_pairwise_correlations(input_filenames,
                                     [a.values() for a in all_analyzed],
                                     os.path.join(output_dir, "correlations"))
