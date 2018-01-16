@@ -1,6 +1,4 @@
 # A program to compare and analyze two assays
-# Should consider moving Pearson and Spearman correlation module from SummaryTable to here
-# (This would run all single-file analyses via SummaryTable, and all two-file analyses here)
 
 import os
 import argparse

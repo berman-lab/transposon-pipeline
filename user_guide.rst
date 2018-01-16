@@ -16,6 +16,8 @@
 -----------
 Explanation needed.
 
+.. image:: images/primer.jpg
+
 1.2 Requirements
 ----------------
 POSIX system running Python 2.7, Bowtie2 and Samtools.
@@ -39,7 +41,7 @@ Required Python packages (dependencies) from outside the standard library can be
 
 1.3 Workflow
 ------------
-.. image:: workflow.png
+.. image:: images/workflow.jpg
 
 
 2 MapFastq.py
@@ -147,7 +149,7 @@ Each of these starts with "filename".
 :.hit_map.png: Image showing the hits' locations along the *C. albicans* genome.
 :.read_map.png: Image showing log10 of the reads' locations along the *C. albicans* genome.
 :.neighborhood_index.N.500_300.png: Explanation needed
-:.proteome,filter_N.bed: Explanation needed
+:.proteome.filter_N.bed: Explanation needed
 :.read_map.png: Image showing the reads' locations along the *C. albicans* genome.
 :.reads_distribution.hits.log10.rdf_N.png: Image showing log10 of the hits' distribution per feature.
 :.reads_distribution.log10.rdf_N.png: Image showing log10 of the reads' distribution per feature.

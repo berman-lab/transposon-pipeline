@@ -577,7 +577,7 @@ def write_analyzed_alb_records(records, output_file):
         
         {
             "field_name": "kornmann_domain_index",
-            "csv_name": "Kornmann DI",
+            "csv_name": "Kornmann FI",
             "format": "%.3f"
         },
         

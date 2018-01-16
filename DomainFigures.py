@@ -54,11 +54,11 @@ REGIONUSAGE = '''Domainfigures.py region
 GENEUSAGE = '''Domainfigures.py gene
     Define drawn area via gene name(s).
 
-    REGUIRES:
+    REQUIRES:
         --genes     Choose gene(s) to draw and highlight. Use standard name(s), or '*' for all genes.
 
     PLUS ONE OF:    Defines flanking region to draw around drawn gene(s).
-        --percent-of-length     [float]     Percent of each gene's length. Default is 0.2 (20%).
+        --percent-of-length     [float]     Percent of each gene's length. Default is 0.2 (20 percent)
         --bps                   [int]       Basepairs before and after gene(s). Default is 20000.
 '''
 
