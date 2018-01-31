@@ -6,6 +6,8 @@ usage = '''MapFastq.py
    -o  --out-dir            [str]   Output directory. Defaults to current directory if left unspecified.
    -i  --input-file-name    [str]   REQUIRED. Input fastq file (Need to include path and .fastq.gz at end of filename)
    -a  --clean-adapters             Clean Illumina universal adapters.
+   -r  --reverse-strand             Search with reverse complement sequence for R2 files.
+                                     (Adaptor cleaning works the same as with R1.)
    -d  --delete-originals           Delete input FASTQ files.
    -k  --keep-clean-fqs             Keep the cleaned FASTQ files.
    -p  --primer-check               Check primer specificity if percent transposon in reads is low.
@@ -13,7 +15,9 @@ usage = '''MapFastq.py
 '''
 
 TnPrimerAndTail = 'GTATTTTACCGACCGTTACCGACCGTTTTCATCCCTA'
+TnRev = 'TAGGGATGAAAACGGTCGGTAACGGTCGGTAAAATAC'
 PrimerOnly = 'GTATTTTACCGACCGTTACCGACC'
+PrimerRev = 'GGTCGGTAACGGTCGGTAAAATAC'
 AdapterSeq = 'AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC'
 
 # NB: bowtie2 requires spaces to be escapes with a backslash for the -x parameter.
@@ -171,6 +175,7 @@ if __name__ == '__main__':
     parser.add_argument("-o", "--out-dir", default='.')
     parser.add_argument("-i", "--input-file-name", required=True)
     parser.add_argument("-a", "--clean-adapters", default=False, action='store_true')
+    parser.add_argument("-r", "--reverse-strand", default=False, action='store_true')
     parser.add_argument("-d", "--delete-originals", default=False, action='store_true')
     parser.add_argument("-k", "--keep-clean-fastqs", default=False, action='store_true')
     parser.add_argument("-p", "--primer_check", default=False, action='store_true')
@@ -180,9 +185,11 @@ if __name__ == '__main__':
     OutputDir = args.out_dir
     FastqFName = args.input_file_name
     clean_adapters = args.clean_adapters
+    reverse_strand = args.reverse_strand
     delete_originals = args.delete_originals
     keep_clean_fqs = args.keep_clean_fastqs
     primer_check = args.primer_check
+
     PrefixName = FastqFName[:-9]
     
     LogFile = open('%s_log.txt' % (PrefixName), 'w+')
@@ -194,9 +201,17 @@ if __name__ == '__main__':
     # that have a transposon, we then trim the adapter from the tail. 
     CleanfName = os.path.join(OutputDir, os.path.basename(PrefixName) + '.clean.fq') 
  
-    if primer_check:  
+    if primer_check and reverse_strand:  
+        CurrRes = RemoveTn(FastqFName, PrimerRev, 24, CleanfName)
+        Log = '=== Reserve strand primer removal (searched w/o Tn tail) ===\r\n%s reads; of these:\r\n  %s (%s%%) contained the primer' % (CurrRes[0], CurrRes[1], CurrRes[2])
+        LogFile.write(Log)
+    elif primer_check:  
         CurrRes = RemoveTn(FastqFName, PrimerOnly, 24, CleanfName)
         Log = '=== Primer removal (searched w/o Tn tail) ===\r\n%s reads; of these:\r\n  %s (%s%%) contained the primer' % (CurrRes[0], CurrRes[1], CurrRes[2])
+        LogFile.write(Log)
+    elif reverse_strand:   
+        CurrRes = RemoveTn(FastqFName, TnRev, 37, CleanfName)
+        Log = '=== Reverse strand transposon removal (searched with primer+Tn tail) ===\r\n%s reads; of these:\r\n  %s (%s%%) contained the transposon' % (CurrRes[0], CurrRes[1], CurrRes[2])
         LogFile.write(Log)
     else:   
         CurrRes = RemoveTn(FastqFName, TnPrimerAndTail, 37, CleanfName)
