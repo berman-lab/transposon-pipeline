@@ -11,9 +11,10 @@ import pandas as pd
 # Homologous regions
 # Literature essentials/non-essentials
 # Ignored features at coverage 
-# _KEYS = ("feature_db", "homologous_regions", "deleted_regions", "ignored_regions", "ignored_features", "literature_essentials", "literature_non_essentials")
 class Organism(object):
-    _KEYS = ("feature_db", "homologous_regions", "deleted_regions", "ignored_regions", "ignored_features", "literature_essentials", "literature_non_essentials")
+    _KEYS = ("feature_db", "homologous_regions", "deleted_regions",
+             "ignored_regions", "ignored_features", "literature_essentials",
+             "literature_non_essentials", "genes_with_paralogs")
     
     def __init__(self):
         self._attr_cache = {}
@@ -31,6 +32,7 @@ class Organism(object):
         self.ignored_features = None
         self.literature_essentials = None
         self.literature_non_essentials = None
+        self.genes_with_paralogs = None
     
     @Shared.memoized
     def _read_range_data(self, file_name):
@@ -74,6 +76,11 @@ class Organism(object):
                 result.add(f.standard_name)
         
         return result
+    
+    def _get_genes_with_paralogs(self, paralog_filename):
+        with open(paralog_filename, 'r') as in_file:
+            features = (self.feature_db.get_feature_by_name(f.strip()) for f in in_file.readlines())
+            return set(f.standard_name for f in features if f is not None) 
 
 class Calbicans(Organism):
     def _get_feature_db(self):
@@ -94,6 +101,9 @@ class Calbicans(Organism):
     
     def _get_literature_non_essentials(self):
         return None
+    
+    def _get_genes_with_paralogs(self):
+        return Organism._get_genes_with_paralogs(self, Shared.get_dependency(os.path.join("albicans", "hasParalogs_ca.txt")))
 
 class Scerevisiae(Organism):
     def _get_feature_db(self):
@@ -150,6 +160,9 @@ class Scerevisiae(Organism):
     def conflicting_essentials(self):
         return self.literature_essentials & self.literature_non_essentials
     
+    def _get_genes_with_paralogs(self):
+        return Organism._get_genes_with_paralogs(self, Shared.get_dependency(os.path.join("cerevisiae", "hasParalogs_sc.txt")))
+    
 class Spombe(Organism):
     def _get_feature_db(self):
         return GenomicFeatures.default_pom_db()
@@ -177,6 +190,9 @@ class Spombe(Organism):
         
         return set(r[0] for _ix, r in viability_table.iterrows() if r[1] == "inviable"), \
             set(r[0] for _ix, r in viability_table.iterrows() if r[1] == "viable")
+            
+    def _get_genes_with_paralogs(self):
+        return Organism._get_genes_with_paralogs(self, Shared.get_dependency(os.path.join("pombe", "hasParalogs_sp.txt")))
         
 # The lazy singletons:    
 alb = Calbicans()

@@ -7,7 +7,7 @@ import glob
 import os
 import csv
 import cPickle
-from itertools import product, chain
+from itertools import product, chain, repeat
 import re
 from collections import OrderedDict
 from pprint import pprint
@@ -24,7 +24,8 @@ import matplotlib.pyplot as plt
 from matplotlib_venn import venn2, venn3
 
 def test_classifier(classifier, features, annotations):
-    """Test a classifier using given features and annotations.
+    """Test a classifier using given features and annotations. Uses a 5-fold
+    cross-validation method to score all of the test data points.
     
     Parameters
     ----------
@@ -76,6 +77,8 @@ def get_training_groups():
     
     def _flatten(features):
         # Recursive, generator-based flattening.
+        # NB: the above is probably a lie, and it's not recursive, but goes
+        # one level deep, which is sufficient here.
         for f in features:
             if isinstance(f, str):
                 yield f
@@ -88,9 +91,27 @@ def get_training_groups():
 
 
 def get_youden_statistic(fpr, tpr, thresholds):
+    """The Youden index (or J statistic) is the threshold which maximizes 
+    the (TPR-FPR) value."""
+    
     return max(zip(thresholds, tpr, fpr), key=lambda (_th, t, f): t-f)
 
 def draw_venn(title, output_file_path, data, labels):
+    """A convenience function for generating Venn diagrams and saving them to
+    a destination on the drive. The `data` and `labels` can be of size 2 or 3.
+    
+    Parameters
+    ----------
+    title : str
+        The title of the plot.
+    output_file_path : str
+        The path in which the plot will be saved.
+    data : list of set
+        The data to plot - should be represented as sets.
+    labels : list of str
+        The labels of the data to plot.
+    """
+    
     # TODO: should go into a drawing module.
     plt.figure(figsize=(8,8))
     
@@ -125,18 +146,6 @@ def no_depleted_hit_features(records):
     # If there were no insertions in the feature AND its neighborhood,
     # we can't trust this feature (maybe it was deleted):
     return (r for r in records if r["neighborhood_hits"] > 0 or r["hits"] > 0)
-
-def _get_sorted_hit_files(folder):
-    return sorted(glob.glob(os.path.join(folder, "*_Hits.txt")), key=lambda path: int(re.findall("\d+", path)[-1]))
-
-def _concat_lists(lists):
-    result = []
-    for l in lists:
-        result.extend(l)
-    return result
-
-def _take_ixes(seq, ixes):
-    return [item for ix, item in enumerate(seq) if ix in ixes]
 
 def combine_pre_post(pre_records, post_records):
     """Combine pre- and post- records into a single record list, by appending
@@ -177,6 +186,73 @@ def explode_col_config(col_config):
     return result
 
 def run_pipeline(cls_factory, cls_feature_groups, data, train_col_config, class_col_config, output_folder, target_fpr):
+    """Classify the given datasets and store the output into the given folder.
+    
+    Parameters
+    ----------
+    cls_factory : dict of str to factory function
+        A dict of classifier names to their factory functions. Each dataset
+        will be classified separately with each of the classifiers given.
+        
+        For example:
+        {
+            "Cls1": lambda: MyClassifier(p1=42, p2=666)
+        }
+    cls_feature_groups : dict of str to tuple
+        The feature groups which to use during classification. Each classifier
+        will be run with each of the feature groups separately.
+        
+        For example:
+        {
+            "Group 1": ("hits", "length", "reads")
+        }
+    data : dict of str to dataset descriptor
+        The datasets to classify. Supports multiple separate classifications.
+        Organized around training sets - each training set can be used to
+        classify multiple datasets, and be comapred with multiple benchrmarks
+        (if desired).
+    
+        IMPORTANT: records can be mutated (i.e., keys added) during the classification.
+        It is recommended to shallow-copy records passed into this function,
+        and keep a handle to them. That shallow copy can be kept around for
+        further inspection of classifier scores later.
+        
+        Detailed format:
+        {
+            "Classificaiton name 1": (
+                list_of_essential_records_for_training,
+                list_of_non_essential_records_for_training,
+                {
+                    "Dataset to classify 1": records_to_classify,
+                    ...
+                },
+                # OPTIONAL: dict of benchmarks for comparison
+                {
+                    "Benchmark 1": (
+                        essential_records,
+                        non_essential_records
+                    ),
+                    ...
+                }
+            ),
+            ...
+        }
+    train_col_config : dict
+        TBD:
+    class_col_config : dict
+        TBD
+    output_folder : str
+        TBD
+    target_fpr : float
+        TBD
+    
+    Returns
+    -------
+    tuple of tuples
+        The ROC curve parameters, as returned by `sklearn.metrics.roc_curve`,
+        and the scores, as the second item of the tuple.
+    """
+    
     # Insert the classifier data into the column configuration.
     # We assume that the last two columns are type and description, so we want them to be last.
     train_col_config = list(train_col_config)
@@ -346,10 +422,15 @@ def run_pipeline(cls_factory, cls_feature_groups, data, train_col_config, class_
                     )
                     fpr_df.to_excel(excel_writer, sheet_name="%s - FPRs-%s-%s" % (bench_label, cls_name, grp_name), index=False)
 
-def write_auc_curve( (fpr, tpr, _threshold), output_file ):
+def write_auc_curve( (fpr, tpr, _threshold), output_file, title=None ):
     classifier_auc = auc(fpr, tpr)
     plt.plot(fpr, tpr, label="AUC = %.3f" % classifier_auc)
     plt.legend(loc="lower right")
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    
+    if title is not None:
+        plt.title(title)
     
     plt.savefig(output_file,
                 transparent=True,
@@ -404,260 +485,110 @@ def write_ortholog_excel(orth_df, calb_fprs_df, scer_fprs_df, spom_fprs_df, outp
             for row_ix in xrange(1, orth_df.shape[0]+1):
                 orth_sheet.write_formula(row_ix, verdict_col_ix, '=IF(OrthologsTable[[#This Row],[%s RF G4]]>=\'%s\'!$D$%d, "Yes", "No")' % (prefix, ctrl_sheet_name, org_ix+2))
 
-if __name__ == "__main__":
-    output_folder = os.path.join(Shared.get_script_dir(), "output", "predictions - just G4")
     
-    alb_db = GenomicFeatures.default_alb_db()
-    ignored_genes = Organisms.alb.ignored_features
-    ignored_genes |= set(f.standard_name for f in alb_db.get_all_features() if not f.is_orf or "dubious" in f.type.lower())
-     
-    ignored_genes_pom = Organisms.pom.ignored_features
-    ignored_genes_cer = Organisms.cer.ignored_features
+def main():
+    output_folder = os.path.join(Shared.get_script_dir(), "output", "predictions - upstream calculations")
     
-    all_track_files = glob.glob(os.path.join(Shared.get_script_dir(), "dependencies", "Kornmann", "*WildType*.wig"))
-    all_track_filenames = [os.path.split(file_path)[-1][:-4] for file_path in all_track_files]
+    # Set up needed infrastructure
+    # The feature DBs:
+    alb_db = Organisms.alb.feature_db
+    cer_db = Organisms.cer.feature_db
+    pom_db = Organisms.pom.feature_db
     
-    # TODO: this is used elsewhere, and should be refactored into a single function.
-    # TODO: it's not clear we need the pickled data - previously we wanted to save time on looking
-    # up the ORF in each hit, but it seems like it's not longer needed in the code, so we can erase that code
-    # and save time and space.
-    # We cache the hits because the hit reading process involves finding the
-    # feature which got hit, for every hit, and that makes reading an O(n log n)
-    # operation, which is a little slow. O(n) is better here.
-    hit_cache = Shared.get_dependency("Kornmann", "cached_sc_track_hits.dat")
-    if not os.path.exists(hit_cache):
-        all_tracks = [SummaryTable.get_hits_from_wig(fname) for fname in all_track_files]
-        with open(hit_cache, 'wb') as pickle_file:
-            cPickle.dump(all_tracks, pickle_file)
-    else:
-        with open(hit_cache, 'rb') as pickle_file:
-            all_tracks = cPickle.load(pickle_file)
-      
-    wt1_hits = all_tracks[-2]
-    wt2_hits = all_tracks[-1]
-    cer_wt_combined = wt1_hits + wt2_hits
-       
-    # Test training from cache:
-    cer_db = GenomicFeatures.default_cer_db()
-       
-    wild_type_1_benchmark_records = []
-#     wt1_analyzed = SummaryTable.analyze_hits(wt1_hits, cer_db, 10000).values()
-#     wild_type_1_benchmark_records = list( only_orfs(no_dubious_features(no_depleted_hit_features(wt1_analyzed))) )
-      
-    wild_type_2_benchmark_records = []
-#     wt2_analyzed = SummaryTable.analyze_hits(wt2_hits, cer_db, 10000).values()
-#     wild_type_2_benchmark_records = list( only_orfs(no_dubious_features(no_depleted_hit_features(wt2_analyzed))) )
-       
+    # Read cerevisiae hit data:
+    all_cer_track_files = glob.glob(os.path.join(Shared.get_script_dir(), "dependencies", "Kornmann", "*WildType*.wig"))    
+    all_cer_tracks = [SummaryTable.get_hits_from_wig(fname) for fname in all_cer_track_files]
+    cer_wt_combined = sum(all_cer_tracks, [])
+    
     cer_wt_combined_analyzed = SummaryTable.analyze_hits(cer_wt_combined, cer_db, 10000).values()
     cer_wt_combined_benchmark_records = list( only_orfs(no_dubious_features(no_depleted_hit_features(cer_wt_combined_analyzed))) )
-    cer_wt_combined_benchmark_records = [r for r in cer_wt_combined_benchmark_records if r["feature"].standard_name not in ignored_genes_cer]
-       
-    for record in chain(wild_type_1_benchmark_records, wild_type_2_benchmark_records, cer_wt_combined_analyzed): #cer_wt_combined_benchmark_records):
+    ignored_cer_genes = Organisms.cer.ignored_features
+    cer_wt_combined_benchmark_records = [r for r in cer_wt_combined_benchmark_records if r["feature"].standard_name not in ignored_cer_genes]
+    
+    for record in cer_wt_combined_analyzed:
         rec_name = record["feature"].standard_name
         record["ground_truth"] = "Yes" if rec_name in Organisms.cer.literature_essentials else "No" if rec_name in Organisms.cer.literature_non_essentials else ""
+        record["has_paralog"] = "Yes" if rec_name in Organisms.cer.genes_with_paralogs else ""
 
-    rdf = 1
-    alb_db = GenomicFeatures.default_alb_db()
-    post_hits = SummaryTable.read_hit_files(_get_sorted_hit_files(Shared.get_dependency("albicans/experiment data/post evo/q20m2")), rdf)
-    post_analyzed = SummaryTable.analyze_hits(_concat_lists(_take_ixes(post_hits, (3-1, 7-1, 11-1))), alb_db)
+    # Read albicans hit data:
+    rdf = 1 # Read depth filter used
+    alb_hit_file_folder = Shared.get_dependency("albicans/experiment data/post evo/q20m2")
+    post_hits = SummaryTable.read_hit_files(glob.glob(os.path.join(alb_hit_file_folder, '*03*')) +
+                                            glob.glob(os.path.join(alb_hit_file_folder, '*07*')) +
+                                            glob.glob(os.path.join(alb_hit_file_folder, '*11*')),
+                                            rdf)
+    post_analyzed = SummaryTable.analyze_hits(sum(post_hits, []), alb_db)
     
+    ignored_alb_genes = Organisms.alb.ignored_features
+    ignored_alb_genes |= set(f.standard_name for f in alb_db.get_all_features() if not f.is_orf or "dubious" in f.type.lower())
     for key in post_analyzed.keys():
-        if key in ignored_genes:
+        if key in ignored_alb_genes:
             del post_analyzed[key]
     
     SummaryTable.enrich_alb_records(post_analyzed.values())
     
     # These FPs and FNs were manually curated by us:
-    fps = set(["C5_02260C_A", "C4_07200C_A", "C7_01840W_A", "C3_07480W_A", "C1_09370W_A", "C1_06900C_A", "C4_04930C_A", "C1_14190C_A", "C6_00320C_A", "C5_05310W_A", "C1_11280W_A", "C2_05140W_A", "C4_05180C_A", "C1_14470W_A"])
-    fns = set(["C4_00610W_A", "C2_10210C_A", "C1_03600W_A", "C7_00700W_A", "C4_04730W_A", "CR_01740W_A", "CR_00710C_A", "C2_04760W_A", "C1_04380W_A", "C4_03440C_A", "C1_04090C_A", "C4_04180C_A", "C1_10860C_A", "C5_02900W_A", "CR_06420W_A", "C2_09370C_A", "CR_03240C_A", "C1_04330W_A", "C7_00890C_A", "C2_07100W_A", "C2_04220C_A", "C6_02840C_A", "C5_01720C_A", "C1_02230W_A", "C1_09870W_A", "C2_06540C_A", "C1_01790W_A", "C3_07550C_A", "C5_04600C_A", "C3_02960C_A", "C5_05190W_A", "CR_03430W_A", "C1_12510W_A", "CR_10140W_A", "CR_05620C_A", "C1_00700W_A", "C4_01190W_A", "C1_01490W_A", "C4_00130W_A", "C7_04230W_A", "C1_10210C_A", "CR_05030W_A", "C1_11400C_A", "C1_00060W_A", "CR_07580C_A", "C7_03940C_A", "CR_06640C_A", "C4_04090C_A", "C4_04850C_A", "C1_06230C_A", "C1_07970C_A", "C2_03180C_A"])
+    alb_lit_fps = set(["C5_02260C_A", "C4_07200C_A", "C7_01840W_A", "C3_07480W_A", "C1_09370W_A", "C1_06900C_A", "C4_04930C_A", "C1_14190C_A", "C6_00320C_A", "C5_05310W_A", "C1_11280W_A", "C2_05140W_A", "C4_05180C_A", "C1_14470W_A"])
+    alb_lit_fns = set(["C4_00610W_A", "C2_10210C_A", "C1_03600W_A", "C7_00700W_A", "C4_04730W_A", "CR_01740W_A", "CR_00710C_A", "C2_04760W_A", "C1_04380W_A", "C4_03440C_A", "C1_04090C_A", "C4_04180C_A", "C1_10860C_A", "C5_02900W_A", "CR_06420W_A", "C2_09370C_A", "CR_03240C_A", "C1_04330W_A", "C7_00890C_A", "C2_07100W_A", "C2_04220C_A", "C6_02840C_A", "C5_01720C_A", "C1_02230W_A", "C1_09870W_A", "C2_06540C_A", "C1_01790W_A", "C3_07550C_A", "C5_04600C_A", "C3_02960C_A", "C5_05190W_A", "CR_03430W_A", "C1_12510W_A", "CR_10140W_A", "CR_05620C_A", "C1_00700W_A", "C4_01190W_A", "C1_01490W_A", "C4_00130W_A", "C7_04230W_A", "C1_10210C_A", "CR_05030W_A", "C1_11400C_A", "C1_00060W_A", "CR_07580C_A", "C7_03940C_A", "CR_06640C_A", "C4_04090C_A", "C4_04850C_A", "C1_06230C_A", "C1_07970C_A", "C2_03180C_A"])
     
-    sp_sc_essentials = SummaryTable.get_calb_ess_in_sc()[0] & SummaryTable.get_calb_ess_in_sp()[0]
-    deleted_libs = SummaryTable.get_homann_deletions() | SummaryTable.get_noble_deletions() | SummaryTable.get_sanglard_deletions()
+    alb_orths_essential_in_sp_and_sc = SummaryTable.get_calb_ess_in_sc()[0] & SummaryTable.get_calb_ess_in_sp()[0]
+    alb_deleted_genes = SummaryTable.get_homann_deletions() | SummaryTable.get_noble_deletions() | SummaryTable.get_sanglard_deletions()
     
     # These are "systematic", but not manually filtered.
-    benchmark_ess = sp_sc_essentials - deleted_libs
-    benchmark_non_ess = deleted_libs - sp_sc_essentials
-    benchmark_all = benchmark_ess | benchmark_non_ess
+    alb_lit_ess = alb_orths_essential_in_sp_and_sc - alb_deleted_genes
+    alb_lit_non_ess = alb_deleted_genes - alb_orths_essential_in_sp_and_sc
     
     # Used for training:
-    filtered_benchmark_ess = benchmark_ess - fps
-    filtered_benchmark_non_ess = benchmark_non_ess - fns
+    filtered_alb_lit_ess = alb_lit_ess - alb_lit_fps
+    filtered_alb_lit_non_ess = alb_lit_non_ess - alb_lit_fns
     
+    # TODO: figure out the Roemer thing.
     roemer_ess, roemer_non_ess, omeara_ess, omeara_non_ess = \
         SummaryTable.get_grace_essentials()
     
     # TODO: generalize for cerevisiae and pombe?
     for record in post_analyzed.values():
         rec_name = record["feature"].standard_name
-        record["filtered_in_training"] = "FP" if rec_name in fps else "FN" if rec_name in fns else ""
-        record["ground_truth"] = "Yes" if rec_name in benchmark_ess else "No" if rec_name in benchmark_non_ess else ""
+        record["filtered_in_training"] = "FP" if rec_name in alb_lit_fps else "FN" if rec_name in alb_lit_fns else ""
+        record["ground_truth"] = "Yes" if rec_name in alb_lit_ess else "No" if rec_name in alb_lit_non_ess else ""
     
-    cer_db = GenomicFeatures.default_cer_db()
-    cols_config = [
-        {
-            "field_name": "feature",
-            "csv_name": "Standard name",
-            "format": lambda f: f.standard_name
-        },
+    # Read the pombe hit data:
+    pom_hits = SummaryTable.read_pombe_hit_file(Shared.get_dependency("pombe", "hermes_hits.csv"), rdf)
+    ignored_pom_genes = Organisms.pom.ignored_features
+    pom_records = SummaryTable.analyze_hits(pom_hits, pom_db)
+    pom_records = {n: f for n, f in pom_records.items() if n not in ignored_pom_genes}
+    pom_ess_names = Organisms.pom.literature_essentials
+    pom_non_ess_names = Organisms.pom.literature_non_essentials
+    pom_ess_names -= ignored_pom_genes
+    pom_non_ess_names -= ignored_pom_genes
+    pom_ess_records = [pom_records[n] for n in pom_ess_names if n in pom_records]
+    pom_non_ess_records = [pom_records[n] for n in pom_non_ess_names if n in pom_records]
+    for r in pom_records.values():
+        std_name = r["feature"].standard_name 
+        if std_name in pom_ess_names:
+            r["ground_truth"] = "Yes"
+        elif std_name in pom_non_ess_names:
+            r["ground_truth"] = "No"
+        else:
+            r["ground_truth"] = ""
         
-        {
-            "field_name": "feature",
-            "csv_name": "Common name",
-            "format": lambda f: f.common_name
-        },
+        r["has_paralog"] = "Yes" if std_name in Organisms.pom.genes_with_paralogs else ""
         
-        {
-            "field_name": "feature",
-            "csv_name": "Sc ortholog",
-            "format": lambda f: ','.join(f.cerevisiae_orthologs) if hasattr(f, 'cerevisiae_orthologs') else ""
-        },
-        
-        {
-            "field_name": "feature",
-            "csv_name": "Sc std name",
-            "format": lambda f: cer_db.get_feature_by_name(list(f.cerevisiae_orthologs)[0]).standard_name if len(getattr(f, 'cerevisiae_orthologs', [])) > 0 else ""
-        },
-        
-        {
-            "field_name": "cer_fitness",
-            "csv_name": "Sc fitness",
-        },
-        
-        {
-            "field_name": "essential_in_cerevisiae",
-            "csv_name": "Essential in Sc",
-        },
-        
-        {
-            "field_name": "cer_synthetic_lethal",
-            "csv_name": "SL in Sc",
-        },
-        
-        {
-            "field_name": "pombe_ortholog",
-            "csv_name": "Sp ortholog",
-        },
-         
-        {
-            "field_name": "essential_in_pombe",
-            "csv_name": "Essential in Sp",
-        },
-        
-        {
-            "field_name": "essential_in_albicans_grace_omeara",
-            "csv_name": "Essential in O'Meara",
-        },
-        
-        {
-            "field_name": "essential_in_mitchell",
-            "csv_name": "Essential in Mitchell",
-        },
-        
-        {
-            "field_name": "deleted_in_calb",
-            "csv_name": "Deleted in Calb",
-        },
-        
-        {
-            "field_name": "filtered_in_training",
-            "csv_name": "Filtered in training",
-        },
-        
-        {
-            "field_name": "feature",
-            "csv_name": "Length",
-            "format": lambda f: len(f)
-        },
-        
-        {
-            "field_name": "hits",
-            "csv_name": "Hits",
-            "format": "%d",
-            "local": True
-        },
-        
-        {
-            "field_name": "reads",
-            "csv_name": "Reads",
-            "format": "%d",
-            "local": True
-        },
-        
-        {
-            "field_name": "max_free_region",
-            "csv_name": "Longest free interval",
-            "format": "%d",
-            "local": True
-        },
-                   
-        {
-            "field_name": "freedom_index",
-            "csv_name": "Freedom index",
-            "format": "%.2f",
-            "local": True
-        },
-        
-        {
-            "field_name": "neighborhood_index",
-            "csv_name": "Neighborhood index",
-            "format": "%.3f",
-            "local": True
-        },
-
-        {
-            "field_name": "upstream_hits_100",
-            "csv_name": "Upstream hits 100",
-            "format": "%d",
-            "local": True
-        },
-        
-        {
-            "field_name": "n_term_hits_100",
-            "csv_name": "N-term hits 100",
-            "format": "%d",
-            "local": True
-        },
-        
-        {
-            "field_name": "feature",
-            "csv_name": "Type",
-            "format": lambda f: f.type
-        },
-        
-        {
-            "field_name": "feature",
-            "csv_name": "Description",
-            "format": lambda f: f.description
-        },
-    ]
+    # Set up the classifer:
     
+    cols_config = COLS_CONFIG
     
     # Define the classification parameters:
     feature_groups = OrderedDict((
+#         ("G3", ("neighborhood_index", "length", "hits", "freedom_index", "upstream_hits_100")),
         ("G4", ("neighborhood_index", "length", "hits", "reads", "freedom_index", "upstream_hits_100")),
+#         ("G5", ("neighborhood_index", "length", "hits", "reads_ni", "freedom_index", "upstream_hits_100")),
     ))
     
     classifier_factory = {
 #         "LR": lambda: LogisticRegression(),
         "RF": lambda: RandomForestClassifier(n_estimators=100, random_state=0)
     }
-    
-    pom_hits = SummaryTable.read_pombe_hit_file("/Users/bermanlab/ngs-bench/Hermes/SRR327340.trimmed.trail_q_20.sorted_Hits.csv", rdf)
-    pom_records = SummaryTable.analyze_hits(pom_hits, GenomicFeatures.default_pom_db())
-    pom_records = {n: f for n, f in pom_records.items() if n not in ignored_genes_pom}
-    pom_ess_names = Organisms.pom.literature_essentials
-    pom_non_ess_names = Organisms.pom.literature_non_essentials
-    pom_ess_names -= ignored_genes_pom
-    pom_non_ess_names -= ignored_genes_pom
-    pom_ess_records = [pom_records[n] for n in pom_ess_names if n in pom_records]
-    pom_non_ess_records = [pom_records[n] for n in pom_non_ess_names if n in pom_records]
-    for r in pom_records.values():
-        if r["feature"].standard_name in pom_ess_names:
-            r["ground_truth"] = "Yes"
-        elif r["feature"].standard_name in pom_non_ess_names:
-            r["ground_truth"] = "No"
-        else:
-            r["ground_truth"] = ""
             
     pom_db = GenomicFeatures.default_pom_db()
     spom_core_ess = set(f.standard_name for f in
@@ -690,7 +621,7 @@ if __name__ == "__main__":
     
     copy_calb_class_dataset = lambda: map(dict, post_analyzed.itervalues())
     copy_scer_com_class_dataset = lambda: map(dict, cer_wt_combined_benchmark_records)
-    copy_spom_class_dataset = lambda: map(dict, (r for k, r in pom_records.iteritems() if k not in ignored_genes_pom))
+    copy_spom_class_dataset = lambda: map(dict, (r for k, r in pom_records.iteritems() if k not in ignored_pom_genes))
     
     calb_ortholog_class_dataset = copy_calb_class_dataset()
     scer_ortholog_class_dataset = copy_scer_com_class_dataset()
@@ -699,11 +630,11 @@ if __name__ == "__main__":
     copy_omeara_bench_ess = lambda: [dict(r) for r in post_analyzed.values() if r["feature"].standard_name in omeara_ess]
     copy_omeara_bench_non_ess = lambda: [dict(r) for r in post_analyzed.values() if r["feature"].standard_name in omeara_non_ess]
     
-    copy_calb_bench_ess = lambda:  map(dict, (r for n, r in post_analyzed.iteritems() if n in filtered_benchmark_ess))
-    copy_calb_bench_non_ess = lambda: map(dict, (r for n, r in post_analyzed.iteritems() if n in filtered_benchmark_non_ess))
+    copy_calb_bench_ess = lambda:  map(dict, (r for n, r in post_analyzed.iteritems() if n in filtered_alb_lit_ess))
+    copy_calb_bench_non_ess = lambda: map(dict, (r for n, r in post_analyzed.iteritems() if n in filtered_alb_lit_non_ess))
     
-    training_calb_manually_curated_ess = [dict(post_analyzed[n]) for n in filtered_benchmark_ess if n in post_analyzed]
-    training_calb_manually_curated_non_ess = [dict(post_analyzed[n]) for n in filtered_benchmark_non_ess if n in post_analyzed]
+    training_calb_manually_curated_ess = [dict(post_analyzed[n]) for n in filtered_alb_lit_ess if n in post_analyzed]
+    training_calb_manually_curated_non_ess = [dict(post_analyzed[n]) for n in filtered_alb_lit_non_ess if n in post_analyzed]
     
     # These FPs and FNs were manually curated by us:
     scer_training_fps = set(["S000005081", "S000000510", "S000003278", "S000005250", "S000002448", "S000006163"])
@@ -737,195 +668,77 @@ if __name__ == "__main__":
             training_calb_manually_curated_ess,
             training_calb_manually_curated_non_ess,
             OrderedDict((
-#                 ("Calb", (copy_calb_class_dataset(),)),
+                ("Calb", (copy_calb_class_dataset(),)),
                 ("Calb", (calb_ortholog_class_dataset,)),
-#                 ("Scer-com", (copy_scer_com_class_dataset(),)),
-#                 ("Spom", (copy_spom_class_dataset(),)),
             )),
             OrderedDict((
-#                 ("Scer-com", (
-#                     copy_scer_com_bench_ess(),
-#                     copy_scer_com_bench_non_ess(),
-#                 )),
-#                 ("Omeara", (
-#                     copy_omeara_bench_ess(),
-#                     copy_omeara_bench_non_ess(),
-#                 )),
-#                 ("Spom", (
-#                     copy_spom_bench_ess(),
-#                     copy_spom_bench_non_ess(),
-#                 )),
-#                 ("Calb", (
-#                     copy_calb_bench_ess(),
-#                     copy_calb_bench_non_ess()
-#                 ))
+                ("Scer-com", (
+                    copy_scer_com_bench_ess(),
+                    copy_scer_com_bench_non_ess(),
+                )),
+                ("Spom", (
+                    copy_spom_bench_ess(),
+                    copy_spom_bench_non_ess(),
+                )),
+                ("Calb", (
+                    copy_calb_bench_ess(),
+                    copy_calb_bench_non_ess()
+                )),
             ))
         )),
-#         ("Calb training", (
-#             calb_core_training_ess,
-#             calb_core_training_non_ess,
-#             OrderedDict((
-#                 ("Calb", (copy_calb_class_dataset(),)),
-#                 ("Scer-com", (copy_scer_com_class_dataset(),)),
-#                 ("Spom", (copy_spom_class_dataset(),)),
-#             )),
-#             OrderedDict((
-#                 ("Scer-com", (
-#                     copy_scer_com_bench_ess(),
-#                     copy_scer_com_bench_non_ess(),
-#                 )),
-#                 ("Omeara", (
-#                     copy_omeara_bench_ess(),
-#                     copy_omeara_bench_non_ess(),
-#                 )),
-#                 ("Spom", (
-#                     copy_spom_bench_ess(),
-#                     copy_spom_bench_non_ess(),
-#                 )),
-#                 ("Calb", (
-#                     copy_calb_bench_ess(),
-#                     copy_calb_bench_non_ess()
-#                 ))
-#             ))
-#         )),
-#         ("Calb training - Omeara", (
-#             copy_omeara_bench_ess(),
-#             copy_omeara_bench_non_ess(),
-#             OrderedDict((
-#                 ("Calb", (copy_calb_class_dataset(),)),
-#                 ("Scer-com", (copy_scer_com_class_dataset(),)),
-#                 ("Spom", (copy_spom_class_dataset(),)),
-#             )),
-#             OrderedDict((
-#                 ("Scer-com", (
-#                     copy_scer_com_bench_ess(),
-#                     copy_scer_com_bench_non_ess(),
-#                 )),
-#                 ("Omeara", (
-#                     copy_omeara_bench_ess(),
-#                     copy_omeara_bench_non_ess(),
-#                 )),
-#                 ("Spom", (
-#                     copy_spom_bench_ess(),
-#                     copy_spom_bench_non_ess(),
-#                 )),
-#                 ("Calb", (
-#                     copy_calb_bench_ess(),
-#                     copy_calb_bench_non_ess()
-#                 ))
-#             ))
-#         )),
-#         ("Scer training", (
-#             scer_core_training_ess,
-#             scer_core_training_non_ess,
-#             OrderedDict((
-#                 ("Calb", (copy_calb_class_dataset(),)),
-#                 ("Scer-com", (copy_scer_com_class_dataset(),)),
-#                 ("Spom", (copy_spom_class_dataset(),)),
-#             )),
-#             OrderedDict((
-#                 ("Scer-com", (
-#                     copy_scer_com_bench_ess(),
-#                     copy_scer_com_bench_non_ess(),
-#                 )),
-#                 ("Omeara", (
-#                     copy_omeara_bench_ess(),
-#                     copy_omeara_bench_non_ess(),
-#                 )),
-#                 ("Spom", (
-#                     copy_spom_bench_ess(),
-#                     copy_spom_bench_non_ess(),
-#                 )),
-#                 ("Calb", (
-#                     copy_calb_bench_ess(),
-#                     copy_calb_bench_non_ess()
-#                 ))
-#             ))
-#         )),
         ("Scer training - filtered", (
             filtered_scer_core_training_ess,
             filtered_scer_core_training_non_ess,
             OrderedDict((
-#                 ("Calb", (copy_calb_class_dataset(),)),
+                ("Calb", (copy_calb_class_dataset(),)),
                 ("Scer-com", (scer_ortholog_class_dataset,)),
-#                 ("Spom", (copy_spom_class_dataset(),)),
+                ("Spom", (copy_spom_class_dataset(),)),
             )),
             OrderedDict((
-#                 ("Scer-com", (
-#                     copy_scer_com_bench_ess(),
-#                     copy_scer_com_bench_non_ess(),
-#                 )),
-#                 ("Omeara", (
-#                     copy_omeara_bench_ess(),
-#                     copy_omeara_bench_non_ess(),
-#                 )),
-#                 ("Spom", (
-#                     copy_spom_bench_ess(),
-#                     copy_spom_bench_non_ess(),
-#                 )),
-#                 ("Calb", (
-#                     copy_calb_bench_ess(),
-#                     copy_calb_bench_non_ess()
-#                 ))
+                ("Scer-com", (
+                    copy_scer_com_bench_ess(),
+                    copy_scer_com_bench_non_ess(),
+                )),
+                ("Spom", (
+                    copy_spom_bench_ess(),
+                    copy_spom_bench_non_ess(),
+                )),
+                ("Calb", (
+                    copy_calb_bench_ess(),
+                    copy_calb_bench_non_ess()
+                )),
             ))
         )),
-#         ("Spom training", (
-#             spom_core_training_ess,
-#             spom_core_training_non_ess,
-#             OrderedDict((
-#                 ("Calb", (copy_calb_class_dataset(),)),
-#                 ("Scer-com", (copy_scer_com_class_dataset(),)),
-#                 ("Spom", (copy_spom_class_dataset(),)),
-#             )),
-#             OrderedDict((
-#                 ("Scer-com", (
-#                     copy_scer_com_bench_ess(),
-#                     copy_scer_com_bench_non_ess(),
-#                 )),
-#                 ("Omeara", (
-#                     copy_omeara_bench_ess(),
-#                     copy_omeara_bench_non_ess(),
-#                 )),
-#                 ("Spom", (
-#                     copy_spom_bench_ess(),
-#                     copy_spom_bench_non_ess(),
-#                 )),
-#                 ("Calb", (
-#                     copy_calb_bench_ess(),
-#                     copy_calb_bench_non_ess()
-#                 ))
-#             ))
-#         )),
         ("Spom training - filtered", (
             filtered_spom_core_training_ess,
             filtered_spom_core_training_non_ess,
             OrderedDict((
-#                 ("Calb", (copy_calb_class_dataset(),)),
-#                 ("Scer-com", (copy_scer_com_class_dataset(),)),
+                ("Calb", (copy_calb_class_dataset(),)),
+                ("Scer-com", (copy_scer_com_class_dataset(),)),
                 ("Spom", (spom_ortholog_class_dataset,)),
             )),
             OrderedDict((
-#                 ("Scer-com", (
-#                     copy_scer_com_bench_ess(),
-#                     copy_scer_com_bench_non_ess(),
-#                 )),
+                ("Scer-com", (
+                    copy_scer_com_bench_ess(),
+                    copy_scer_com_bench_non_ess(),
+                )),
 #                 ("Omeara", (
 #                     copy_omeara_bench_ess(),
 #                     copy_omeara_bench_non_ess(),
 #                 )),
-#                 ("Spom", (
-#                     copy_spom_bench_ess(),
-#                     copy_spom_bench_non_ess(),
-#                 )),
-#                 ("Calb", (
-#                     copy_calb_bench_ess(),
-#                     copy_calb_bench_non_ess()
-#                 ))
+                ("Spom", (
+                    copy_spom_bench_ess(),
+                    copy_spom_bench_non_ess(),
+                )),
+                ("Calb", (
+                    copy_calb_bench_ess(),
+                    copy_calb_bench_non_ess()
+                )),
             ))
         )),
     ))
 
-    output_folder = os.path.join(Shared.get_script_dir(), "output", "predictions - FPR 0.1")    
+#     output_folder = os.path.join(Shared.get_script_dir(), "output", "predictions - fixed homann")    
     run_pipeline(classifier_factory, feature_groups, data, cols_config, cols_config, output_folder, 0.1)
     
     # TODO: should not be hard-coded. Consider using DomainFigures to create the figures
@@ -1041,8 +854,6 @@ if __name__ == "__main__":
             sheet = SummaryTable.write_data_to_data_frame(records, inter_col_config)
             sheet.to_excel(excel_writer, sheet_name="Main", index=False)
     
-    
-    
     for ca_status, sc_status, sp_status in product(("Yes", "No"), repeat=3):
         inter_out_folder = os.path.join(output_folder, "Ca-%s Sc-%s Sp-%s" % (ca_status, sc_status, sp_status))
         if not os.path.exists(inter_out_folder):
@@ -1072,7 +883,6 @@ if __name__ == "__main__":
         {"field_name": "train-RF-G4-verdict", "csv_name": "RF - G4 - ess. verdict"}
     ]
     
-    train_verdict = "train-%s" % verdict_to_use
     # Print out the conflicting annotations in the benchmark datasets:
     for training_label, dataset in data.iteritems():
         training_ess, training_non_ess = dataset[:2]        
@@ -1093,7 +903,6 @@ if __name__ == "__main__":
         )
         
     # Ortholog megatable:
-    orthologs = Organisms.get_all_orthologs()
     
     # TODO: we already had this indexed... bah...
     index_dataset = lambda dataset: {r["feature"].standard_name: r for r in dataset}
@@ -1102,22 +911,225 @@ if __name__ == "__main__":
     indexed_scer = index_dataset(scer_ortholog_class_dataset)
     indexed_spom = index_dataset(spom_ortholog_class_dataset)
     
+    # In this code we only generated the orthologs. Currently commented out
+    # because what we want is a left-join of the Calb records with Scer and Spom.
+#     orthologs = Organisms.get_all_orthologs()
+#     for (calb_orth, scer_orth, spom_orth) in orthologs:
+#         calb_record = indexed_calb.get(calb_orth.standard_name)
+#         scer_record = indexed_scer.get(scer_orth.standard_name)
+#         spom_record = indexed_spom.get(spom_orth.standard_name)
+#         
+#         if not calb_record or not scer_record or not spom_record:
+#             continue
+#         
+#         combined_record = {}
+#         for prefix, record in zip(("ca", "sc", "sp"), (calb_record, scer_record, spom_record)):
+#             for key, value in record.iteritems():
+#                 combined_record["%s_%s" % (prefix, key)] = value
+#         
+#         ortholog_records.append(combined_record)
+
+    # The left-join implementation
+    orthologs = [Organisms.get_orths_by_name(n) for n in indexed_calb.keys()]
+    sc_rec_items_to_add = zip(indexed_scer.values()[0].keys(), repeat(""))
+    sp_rec_items_to_add = zip(indexed_spom.values()[0].keys(), repeat(""))
     for (calb_orth, scer_orth, spom_orth) in orthologs:
         calb_record = indexed_calb.get(calb_orth.standard_name)
-        scer_record = indexed_scer.get(scer_orth.standard_name)
-        spom_record = indexed_spom.get(spom_orth.standard_name)
-        
-        if not calb_record or not scer_record or not spom_record:
-            continue
+        scer_record = indexed_scer.get(scer_orth.standard_name if scer_orth else "")
+        spom_record = indexed_spom.get(spom_orth.standard_name if spom_orth else "")
         
         combined_record = {}
         for prefix, record in zip(("ca", "sc", "sp"), (calb_record, scer_record, spom_record)):
-            for key, value in record.iteritems():
+            if record is not None:
+                items_to_add = record.iteritems()
+            else:
+                if prefix == "sc":
+                    items_to_add = sc_rec_items_to_add
+                elif prefix == "sp":
+                    items_to_add = sp_rec_items_to_add
+            
+            for key, value in items_to_add:
                 combined_record["%s_%s" % (prefix, key)] = value
-        
+         
         ortholog_records.append(combined_record)
     
-    orth_cols_config = [
+    # We do want to left-join Calb and the other 
+    
+    orth_cols_config = ORTH_COLS_CONFIG;
+    
+    def get_roc_curve_from_data(data, name):
+        training_ess = data[name][0]
+        training_non_ess = data[name][1]
+        return roc_curve(
+            [1]*len(training_ess) + [0]*len(training_non_ess),
+            [r[train_score_to_use] for r in training_ess] + [r[train_score_to_use] for r in training_non_ess]  
+        )
+    
+    write_ortholog_excel(
+        SummaryTable.write_data_to_data_frame(ortholog_records, orth_cols_config),
+        pd.DataFrame(
+            dict(zip(("FPR", "TPR", "Threshold"), get_roc_curve_from_data(data, "Calb training - manually curated"))),
+            columns=("FPR", "TPR", "Threshold")
+        ),
+        pd.DataFrame(
+            dict(zip(("FPR", "TPR", "Threshold"), get_roc_curve_from_data(data, "Scer training - filtered"))),
+            columns=("FPR", "TPR", "Threshold")
+        ),
+        pd.DataFrame(
+            dict(zip(("FPR", "TPR", "Threshold"), get_roc_curve_from_data(data, "Spom training - filtered"))),
+            columns=("FPR", "TPR", "Threshold")
+        ),
+        os.path.join(output_folder, "orthologs_combined_ex.xlsx")
+    )
+
+
+
+COLS_CONFIG = [
+        {
+            "field_name": "feature",
+            "csv_name": "Standard name",
+            "format": lambda f: f.standard_name
+        },
+        
+        {
+            "field_name": "feature",
+            "csv_name": "Common name",
+            "format": lambda f: f.common_name
+        },
+        
+        {
+            "field_name": "feature",
+            "csv_name": "Sc ortholog",
+            "format": lambda f: ','.join(f.cerevisiae_orthologs) if hasattr(f, 'cerevisiae_orthologs') else ""
+        },
+        
+        {
+            "field_name": "feature",
+            "csv_name": "Sc std name",
+            "format": lambda f: Organisms.cer.feature_db.get_feature_by_name(list(f.cerevisiae_orthologs)[0]).standard_name if len(getattr(f, 'cerevisiae_orthologs', [])) > 0 else ""
+        },
+        
+        {
+            "field_name": "cer_fitness",
+            "csv_name": "Sc fitness",
+        },
+        
+        {
+            "field_name": "essential_in_cerevisiae",
+            "csv_name": "Essential in Sc",
+        },
+        
+        {
+            "field_name": "cer_synthetic_lethal",
+            "csv_name": "SL in Sc",
+        },
+        
+        {
+            "field_name": "pombe_ortholog",
+            "csv_name": "Sp ortholog",
+        },
+         
+        {
+            "field_name": "essential_in_pombe",
+            "csv_name": "Essential in Sp",
+        },
+        
+        {
+            "field_name": "essential_in_albicans_grace_omeara",
+            "csv_name": "Essential in O'Meara",
+        },
+        
+        {
+            "field_name": "essential_in_mitchell",
+            "csv_name": "Essential in Mitchell",
+        },
+        
+        {
+            "field_name": "deleted_in_calb",
+            "csv_name": "Deleted in Calb",
+        },
+        
+        {
+            "field_name": "filtered_in_training",
+            "csv_name": "Filtered in training",
+        },
+        
+        {
+            "field_name": "feature",
+            "csv_name": "Length",
+            "format": lambda f: len(f)
+        },
+        
+        {
+            "field_name": "hits",
+            "csv_name": "Hits",
+            "format": "%d",
+            "local": True
+        },
+        
+        {
+            "field_name": "reads",
+            "csv_name": "Reads",
+            "format": "%d",
+            "local": True
+        },
+        
+        {
+            "field_name": "max_free_region",
+            "csv_name": "Longest free interval",
+            "format": "%d",
+            "local": True
+        },
+                   
+        {
+            "field_name": "freedom_index",
+            "csv_name": "Freedom index",
+            "format": "%.2f",
+            "local": True
+        },
+        
+        {
+            "field_name": "neighborhood_index",
+            "csv_name": "Neighborhood index",
+            "format": "%.3f",
+            "local": True
+        },
+
+        {
+            "field_name": "upstream_hits_100",
+            "csv_name": "Upstream hits 100",
+            "format": "%d",
+            "local": True
+        },
+        
+        {
+            "field_name": "upstream_hits_50",
+            "csv_name": "Upstream hits 50",
+            "format": "%d",
+            "local": True
+        },
+        
+        {
+            "field_name": "n_term_hits_100",
+            "csv_name": "N-term hits 100",
+            "format": "%d",
+            "local": True
+        },
+        
+        {
+            "field_name": "feature",
+            "csv_name": "Type",
+            "format": lambda f: f.type
+        },
+        
+        {
+            "field_name": "feature",
+            "csv_name": "Description",
+            "format": lambda f: f.description
+        },
+    ]
+    
+ORTH_COLS_CONFIG = [
         {
             "field_name": "ca_feature",
             "csv_name": "Ca standard name",
@@ -1133,25 +1145,25 @@ if __name__ == "__main__":
         {
             "field_name": "sc_feature",
             "csv_name": "Sc standard name",
-            "format": lambda f: f.standard_name
+            "format": lambda f: f.standard_name if f else ""
         },
         
         {
             "field_name": "sc_feature",
             "csv_name": "Sc common name",
-            "format": lambda f: f.common_name or f.feature_name
+            "format": lambda f: f.common_name  if f else "" or f.feature_name  if f else ""
         },
         
         {
             "field_name": "sp_feature",
             "csv_name": "Sp standard name",
-            "format": lambda f: f.standard_name
+            "format": lambda f: f.standard_name if f else ""
         },
         
         {
             "field_name": "sp_feature",
             "csv_name": "Sp common name",
-            "format": lambda f: f.common_name
+            "format": lambda f: f.common_name if f else ""
         },
         
         {
@@ -1170,6 +1182,11 @@ if __name__ == "__main__":
         },
         
         {
+            "field_name": "ca_has_paralog",
+            "csv_name": "Paralog in Calb",
+        },
+        
+        {
             "field_name": "ca_essential_in_cerevisiae",
             "csv_name": "Essential in Sc",
         },
@@ -1178,10 +1195,20 @@ if __name__ == "__main__":
             "field_name": "ca_cer_synthetic_lethal",
             "csv_name": "SL in Sc",
         },
-         
+        
+        {
+            "field_name": "sc_has_paralog",
+            "csv_name": "Paralog in Sc",
+        },
+        
         {
             "field_name": "ca_essential_in_pombe",
             "csv_name": "Essential in Sp",
+        },
+        
+        {
+            "field_name": "sp_has_paralog",
+            "csv_name": "Paralog in Spom",
         },
         
         {
@@ -1193,13 +1220,13 @@ if __name__ == "__main__":
         {
             "field_name": "sc_feature",
             "csv_name": "Sc length",
-            "format": lambda f: len(f)
+            "format": lambda f: len(f) if f else ""
         },
         
         {
             "field_name": "sp_feature",
             "csv_name": "Sp length",
-            "format": lambda f: len(f)
+            "format": lambda f: len(f) if f else ""
         },
         
         {
@@ -1337,41 +1364,15 @@ if __name__ == "__main__":
         {
             "field_name": "sc_feature",
             "csv_name": "Sc description",
-            "format": lambda f: f.description
+            "format": lambda f: f.description if f else ""
         },
         
         {
             "field_name": "sp_feature",
             "csv_name": "Sp description",
-            "format": lambda f: f.description
+            "format": lambda f: f.description if f else ""
         },
     ]
-    
-    with pd.ExcelWriter(os.path.join(output_folder, "orthologs_combined.xlsx")) as excel_writer:
-        main_df = SummaryTable.write_data_to_data_frame(ortholog_records, orth_cols_config)
-        main_df.to_excel(excel_writer, sheet_name="Orthologs - combined", index=False)
-    
-    def get_roc_curve_from_data(data, name):
-        training_ess = data[name][0]
-        training_non_ess = data[name][1]
-        return roc_curve(
-            [1]*len(training_ess) + [0]*len(training_non_ess),
-            [r[train_score_to_use] for r in training_ess] + [r[train_score_to_use] for r in training_non_ess]  
-        )
-    
-    write_ortholog_excel(
-        SummaryTable.write_data_to_data_frame(ortholog_records, orth_cols_config),
-        pd.DataFrame(
-            dict(zip(("FPR", "TPR", "Threshold"), get_roc_curve_from_data(data, "Calb training - manually curated"))),
-            columns=("FPR", "TPR", "Threshold")
-        ),
-        pd.DataFrame(
-            dict(zip(("FPR", "TPR", "Threshold"), get_roc_curve_from_data(data, "Scer training - filtered"))),
-            columns=("FPR", "TPR", "Threshold")
-        ),
-        pd.DataFrame(
-            dict(zip(("FPR", "TPR", "Threshold"), get_roc_curve_from_data(data, "Spom training - filtered"))),
-            columns=("FPR", "TPR", "Threshold")
-        ),
-        os.path.join(output_folder, "orthologs_combined_ex.xlsx")
-    )
+
+if __name__ == "__main__":
+    main()
