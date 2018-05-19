@@ -42,6 +42,7 @@ def main():
     gene_region = gene_parser.add_mutually_exclusive_group()
     gene_region.add_argument("--percent-of-length", type=float, default=0.2)
     gene_region.add_argument("--bps", type=int)
+    gene_parser.add_argument("--exclude-genes", type=gene_list_parser, default="")
     
     config_file_parser = subparsers.add_parser("config_file")
     config_file_parser.add_argument("config_file")
@@ -161,8 +162,10 @@ def handle_args(args, hits):
                 gene_pad = args.bps
             else: # args.percent_of_length exists
                 gene_pad = int(args.percent_of_length * len(feature))
+                
+            excluded_genes = [f.standard_name for f in map(db.get_feature_by_name, args.exclude_genes) if f]
             
-            draw_gene(organism, feature, gene_pad, label, hits, args.domains, args.direction, name, args.output_folder, args.absolute_pixel_size)
+            draw_gene(organism, feature, excluded_genes, gene_pad, label, hits, args.domains, args.direction, name, args.output_folder, args.absolute_pixel_size)
     else: # "region"
         chromosome = args.chromosome
         start = args.start
@@ -180,7 +183,17 @@ def handle_args(args, hits):
             absolute_pixel_size=args.absolute_pixel_size
         )
     
-def draw_gene(organism, gene, gene_pad, label, hits, draw_domains, draw_direcions, out_file_prefix, out_dir, absolute_pixel_size=None):     
+def draw_gene(organism,
+              gene,
+              excluded_genes,
+              gene_pad,
+              label,
+              hits,
+              draw_domains,
+              draw_direcions,
+              out_file_prefix,
+              out_dir,
+              absolute_pixel_size=None):     
     region_start = max(floor(gene.start - gene_pad), 0)
     region_end = min(ceil(gene.stop + gene_pad), len(organism.feature_db[gene.chromosome]))
 
@@ -195,6 +208,7 @@ def draw_gene(organism, gene, gene_pad, label, hits, draw_domains, draw_direcion
         draw_direcions,
         os.path.join(out_dir, name),
         highlighted_genes=set([gene.standard_name]),
+        exclude_genes=excluded_genes,
         label=label,
         absolute_pixel_size=absolute_pixel_size
     )
@@ -209,6 +223,7 @@ def draw_genomic_region(
         draw_directions,
         out_file,
         highlighted_genes=frozenset(),
+        exclude_genes=frozenset(),
         label=None,
         absolute_pixel_size=0,
     ):
@@ -273,6 +288,9 @@ def draw_genomic_region(
     feature_track_height_scaled = float(feature_height) / height
     scale_bp = lambda bp: min(1.0, max(0.0, float(bp - region_start)) / region_len) 
     for feature in features_in_range:
+        if feature.standard_name in exclude_genes:
+            continue
+        
         # Draw the feature as a blue rectangle:
         feature_start = scale_bp(feature.start)
         feature_end = scale_bp(feature.stop)
