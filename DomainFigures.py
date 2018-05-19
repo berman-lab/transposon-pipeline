@@ -134,8 +134,6 @@ def main():
     # TODO: we manipulate the chromosome names to reflect the standard names,
     # but this should be done in the hit-reading functions.
     chrom_names = db._chrom_names # TODO: don't do this, _chrom_names are protected!
-    print chrom_names
-    import sys; sys.exit()
     for hit_track in hits:
         new_hit_track = {chrom.name: SortedCollection(key=lambda h: h["hit_pos"]) for chrom in db}
         for hit in hit_track:
@@ -206,15 +204,33 @@ def handle_args(args, hits):
                 pom_name = "Spom-" + "_".join(pom_name_components)
                     
             if isinstance(organism, Organisms.Calbicans):
-                name = "-".join(filter(None, (alb_name, cer_name, pom_name))) 
+                name = "-".join(filter(None, (alb_name, cer_name, pom_name)))
+                
+                if feature.common_name:
+                    label_name = "Ca" + feature.common_name
+                else:
+                    label_name = feature.standard_name[:-2]
             elif isinstance(organism, Organisms.Scerevisiae):
-                name = "-".join(filter(None, (cer_name, alb_name, pom_name))) 
+                name = "-".join(filter(None, (cer_name, alb_name, pom_name)))
+                
+                if feature.common_name:
+                    label_name = "Sc" + feature.common_name
+                elif feature.feature_name:
+                    label_name = feature.feature_name
+                else:
+                    label_name = feature.standard_name
             elif isinstance(organism, Organisms.Spombe):
                 name = "-".join(filter(None, (pom_name, alb_name, cer_name)))
+                
+                # TODO: why is this necessary?
+                if feature.common_name and not "SPAC" in feature.common_name:
+                    label_name = "Sp" + feature.common_name.upper()
+                else:
+                    label_name = feature.standard_name
             
             name += "-" + str(len(feature))
             
-            label = "%s / %s" % (feature.name, len(feature))
+            label = "%s (%d)" % (label_name, len(feature))
             
             chromosome = feature.chromosome
             
@@ -507,19 +523,20 @@ def draw_genomic_region(
         
         max_aligned = float(max(aligned_reads))
         
-        rna_track_y = ignored_track_y + track_height_scaled
-        rna_track_height_scaled = float(rna_track_height) / height
-        
-        for ix, nreads in enumerate(aligned_reads):
-            ref_pos = ix + int(region_start)
-            ctx.rectangle(
-                scale_bp(ref_pos),
-                rna_track_y + (rna_track_height_scaled - rna_track_height_scaled * (nreads / max_aligned)),
-                scale_bp(ref_pos+1) - scale_bp(ref_pos),
-                rna_track_height_scaled * (nreads / max_aligned)
-            )
-            ctx.set_source_rgb(0, 0, 0)
-            ctx.fill()
+        if max_aligned > 0:
+            rna_track_y = ignored_track_y + track_height_scaled
+            rna_track_height_scaled = float(rna_track_height) / height
+             
+            for ix, nreads in enumerate(aligned_reads):
+                ref_pos = ix + int(region_start)
+                ctx.rectangle(
+                    scale_bp(ref_pos),
+                    rna_track_y + (rna_track_height_scaled - rna_track_height_scaled * (nreads / max_aligned)),
+                    scale_bp(ref_pos+1) - scale_bp(ref_pos),
+                    rna_track_height_scaled * (nreads / max_aligned)
+                )
+                ctx.set_source_rgb(0, 0, 0)
+                ctx.fill()
         
     
     # Draw the text:
@@ -529,11 +546,23 @@ def draw_genomic_region(
         label_track_y = (height - label_height) / float(height)
         ctx.move_to((1.0 - label_text_width) / 2.0, label_track_y + label_text_height * 1.25)
         ctx.set_source_rgb(0, 0, 0)
-        ctx.show_text(label)
+        
+        old_font = ctx.get_font_face()
+        slanted_font = cairo.ToyFontFace(old_font.get_family(), cairo.FONT_SLANT_OBLIQUE, old_font.get_weight())
+        for element in label.split(" "):
+            if element.startswith("Ca") or element.startswith("Sp") or element.startswith("Sc"):
+                ctx.set_font_face(slanted_font)
+            ctx.show_text(element)
+            ctx.show_text(" ")
+            ctx.set_font_face(old_font)
+        ctx.set_font_face(old_font)
+        
     
     # Output to PNG
     surface.write_to_png(out_file)
 
+def _get_gene_name(feature, organism):
+    pass
 
 if __name__ == "__main__":
         main()
