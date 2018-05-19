@@ -558,7 +558,7 @@ def write_analyzed_alb_records(records, output_file):
         
         {
             "field_name": "kornmann_domain_index",
-            "csv_name": "Kornmann DI",
+            "csv_name": "Kornmann FI",
             "format": "%.3f"
         },
         
@@ -664,7 +664,6 @@ def write_data_to_data_frame(data, cols_config):
     )
     
     return result
-
 
 @Shared.memoized
 def get_calb_ess_in_sc():
@@ -1062,7 +1061,7 @@ def draw_histogram_of_analysis(dataset, output_file_prefix):
         relative_values = [min(bins, int(bins*(r[field_name] - start)/(stop - start))) for r in dataset.values() if r["hits"] > 0]
         zero_outliers = len([r for r in dataset.values() if r["hits"] == 0])
         right_tail_outliers = len([v for v in relative_values if v == bins])
-        with open(output_file_prefix + "_outlier_stats.txt", 'w') as out_file:
+        with open(output_file_prefix + ".outlier_stats.txt", 'w') as out_file:
             out_file.write(" ".join(str(o) for o in (field_name, zero_outliers, right_tail_outliers)))
         relative_values = [v for v in relative_values if v < bins] # Clip the long-tail end
         # Should we include the 0 outliers?
@@ -1073,11 +1072,6 @@ def draw_histogram_of_analysis(dataset, output_file_prefix):
                        "%s.%s.%.3f_%d.png" % (output_file_prefix, field_name, stop, bins),
                        bins=bins,
                        ylim=ylim)
-            
-#             with open(os.path.join(output_dir, "%s.for_matlab.%.3f_%d.txt" % (fname, stop, bins)), 'w') as out_file:
-#                 new_hist = [0 if h is 0 else h-1 for h in relative_values]
-#                 for b in range(bins):
-#                     out_file.write("%d\n" % len([h for h in new_hist if h == b]))
 
 def draw_histogram(histogram, sample_name, file_name, bins, ylim=300):
     plt.hist(histogram, bins=bins)
@@ -1273,26 +1267,34 @@ def transform_chrom_map_with_log(read_map, base):
     
     return read_map
 
-if __name__ == "__main__":    
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input-dir", required=True)
-    parser.add_argument("-o", "--output-dir", required=True)
-    parser.add_argument("-f", "--read-depth-filter", type=int, default=1)
+    
+    hit_file_template = "*_Hits.txt"
+    
+    parser.add_argument("-i", "--input-dir", default='.', help=("Input directory of '%s'. Default: current directory." % hit_file_template))
+    parser.add_argument("-o", "--output-dir", default='.', help="Output directory for results. Default: current directory.")
+    parser.add_argument("-f", "--read-depth-filter", type=int, default=1, help="Read depth below which insertion events will be ignored. Default: %(default)s.")
+    parser.add_argument("-c", "--pairwise-correlations", default=False, action='store_true', help="Perform pairwise correlations (requires multiple hit files). Default: don't perform.")
     args = parser.parse_args()
     
     input_dir = args.input_dir
     output_dir = args.output_dir
     read_depth_filter = args.read_depth_filter
+    pairwise_correlations = args.pairwise_correlations
     
-    Shared.make_dir(output_dir)
-    
-    alb_db = GenomicFeatures.default_alb_db()
-    
-    input_file_paths = sorted(glob.glob(os.path.join(input_dir, "*_Hits.txt")))
+    input_file_paths = sorted(glob.glob(os.path.join(input_dir, hit_file_template)))
     input_filenames = [os.path.split(file_path)[-1][:-9] for file_path in input_file_paths]
     
-    all_hits = read_hit_files(input_file_paths, read_depth_filter)
+    if not input_filenames:
+        print "ERROR: no hit files matching the '%s' template were found in the input folder (%s), aborting." % (hit_file_template, args.input_dir)
+        import sys; sys.exit(1)
     
+    Shared.make_dir(output_dir)
+    alb_db = GenomicFeatures.default_alb_db()
+    
+    all_hits = read_hit_files(input_file_paths, read_depth_filter)
+
     # Write per-bin hits and reads, for 3D analysis:
     bin_size = 10000
     # [hits, reads, hit rank, read rank]
@@ -1309,7 +1311,8 @@ if __name__ == "__main__":
     for fname_hit_read_bins in hit_read_bins.values():
         for bin_rank, bin_data in enumerate(sorted(chain(*fname_hit_read_bins.values()), key=lambda b: b[0], reverse=True)):
             bin_data[2] = bin_rank+1
-            
+    
+    # Create binned_hits file (one table for all datasets):
     with open(os.path.join(output_dir, "binned_hits.RDF_%d.csv" % read_depth_filter), "w") as out_file:
         writer = csv.writer(out_file)
         writer.writerow(["Bin index"] + list(chain(*zip(input_filenames, ["%s rank" % fname for fname in input_filenames]))))
@@ -1331,7 +1334,7 @@ if __name__ == "__main__":
             writer.writerow([feature.standard_name, feature.common_name, feature.type] +
                             [r["hits"] for r in record_row])
     
-    # Write a table of reads-per-hit for each dataset:
+    # Write a table of reads-per-hit (one for each dataset):
     for fname, hits in zip(input_filenames, all_hits):
         # Transform:
         sum_hits = {chrom.name: {} for chrom in alb_db}
@@ -1339,7 +1342,7 @@ if __name__ == "__main__":
             sum_hits[h["chrom"]][h["hit_pos"]] = sum_hits[h["chrom"]].get(h["hit_pos"], 0) + h["hit_count"] 
             
         # Write out:
-        with open(os.path.join(output_dir, "all_hits.%s.csv" % fname), 'w') as out_file:
+        with open(os.path.join(output_dir, "%s.all_hits.csv" % fname), 'w') as out_file:
             writer = csv.writer(out_file)
             writer.writerow(["Chromosome", "Position", "Reads"])
             for chrom, data in sorted(sum_hits.items()):
@@ -1352,7 +1355,7 @@ if __name__ == "__main__":
         plt.title("Read distribution per hit in %s" % fname)
         plt.xlabel("log10 of # of reads per hit")
         plt.ylabel("# of hits")
-        plt.savefig(os.path.join(output_dir, "reads_distribution.hits.log10.%s.rdf_%d.png" % (fname, read_depth_filter)))
+        plt.savefig(os.path.join(output_dir, "%s.reads_distribution.hits.log10.rdf_%d.png" % (fname, read_depth_filter)))
         plt.close()
     
     # Plot the read distributions per gene:
@@ -1362,7 +1365,7 @@ if __name__ == "__main__":
         plt.title("Read distribution per feature in %s" % fname)
         plt.xlabel("log10 of # of reads per feature")
         plt.ylabel("# of features")
-        plt.savefig(os.path.join(output_dir, "reads_distribution.log10.%s.rdf_%d.png" % (fname, read_depth_filter)))
+        plt.savefig(os.path.join(output_dir, "%s.reads_distribution.log10.rdf_%d.png" % (fname, read_depth_filter)))
         plt.close()
     
     # Plot the hit and read chromosomal maps:
@@ -1374,13 +1377,15 @@ if __name__ == "__main__":
         log_read_map = transform_chrom_map_with_log(make_read_map(hits, bin_size), 10)
         log_hit_map = transform_chrom_map_with_log(make_hit_map(hits, bin_size), 10)
         
-        draw_chrom_map(log_read_map, bin_size, "Log10 reads/10000 bps", 7, math.log(10, 10), os.path.join(output_dir, "log10_read_map.%s.png" % fname))
-        draw_chrom_map(log_hit_map, bin_size, "Log10 hits/10000 bps", 4, math.log(5, 10), os.path.join(output_dir, "log10_hit_map.%s.png" % fname))
+        draw_chrom_map(log_read_map, bin_size, "Log10 reads/10000 bps", 7, math.log(10, 10), os.path.join(output_dir, "%s.log10_read_map.png" % fname))
+        draw_chrom_map(log_hit_map, bin_size, "Log10 hits/10000 bps", 4, math.log(5, 10), os.path.join(output_dir, "%s.log10_hit_map.png" % fname))
      
     # More correlations than you can shake a stick at:
-    perform_pairwise_correlations(input_filenames,
-                                  [a.values() for a in all_analyzed],
-                                  os.path.join(output_dir, "correlations"))
+    #   This first set can only be calculated if have multiple files, the rest do not require that
+    if pairwise_correlations:
+        perform_pairwise_correlations(input_filenames,
+                                      [a.values() for a in all_analyzed],
+                                      os.path.join(output_dir, "correlations"))
     
     for fname, analysis in zip(input_filenames, all_analyzed):
         write_analyzed_alb_records(analysis.values(), os.path.join(output_dir, fname + "_analysis.csv"))

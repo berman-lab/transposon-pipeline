@@ -5,6 +5,18 @@ import pysam
 import itertools
 import Shared
 
+
+					
+usage = '''CreateHitFile.py  
+   -i  --in-dir     [str]   Input directory with .bam files to parse. Defaults to current directory if left unspecified.
+   -o  --out-dir    [str]   Output directory to which the hit file will be writen. Defaults to current directory if left unspecified.
+   -q  --min-mapq   [int]   Map Quality - hits to parse from the bam file (default is 20)
+   -m  --merge-dist [int]   Hits to merge with at most x nt distance between two hits. Default is 2 
+                                Example: Hits in positions 1 and 3  (3-1=2) will be united into a single hit
+   -h  --help               Show this help message and exit 
+'''
+
+
 # TODO: move to config file.
 ChrFile = Shared.get_dependency('albicans', 'reference genome', 'C_albicans_SC5314_version_A22-s07-m01-r08_chromosomes_HapA.fasta')
 FeatureFName = Shared.get_dependency('albicans', 'reference genome', 'C_albicans_SC5314_version_A22-s07-m01-r08_chromosomal_feature.tab')
@@ -12,11 +24,28 @@ FeatureFName = Shared.get_dependency('albicans', 'reference genome', 'C_albicans
 ChrFeatCols = ['FeatureName', 'GeneName','Aliases','FeatureType','Chromosome','StartCoord','StopCoord','Strand','PrimaryCGDID','SecondaryCGDID',\
         'Description','DateCreated','SeqCoordVerDate','Blank1','Blank2','GeneNameReserDate','ReservedIsstandardName','SC_ortholog']
 
+def FindHitsPerSample(SamAlign, ChrFeatMap, Sep0N = 2,MapQ=10):
+    """Goes through Sam file, checks for high confidence alignment, unites unique positions if they can be aligned with adjunct positions.
 
-#this procedure traverse the sam file, check for high confidence alignment, unite unique positions, and if they should / could be aligned with adjucent positions
-def FindHitsPerSample(SamAlign,ChrFeatMap, Sep0N = 2,MapQ=10):
+    Parameters
+    ----------
+        SamAlign    :   x
+        ChrFeatMap  :   x
+        SepON   :   integer
+        MapQ    :   integer
+            Setting for map quality. Default of 10 is equal to 1% chance of occurring in another position.
+
+    Returns
+    -------
+        List of lists (?)
+            ChrHitList  :   x 
+            TotalHits   :   x 
+            TotalUniqueHits :   x 
+            total_reads :   x 
+    """
     Chromosomes = SamAlign.references
     hit_map = {}
+
     for line in SamAlign:
         assert line.tid == line.reference_id
         if line.mapq < MapQ:
@@ -26,15 +55,13 @@ def FindHitsPerSample(SamAlign,ChrFeatMap, Sep0N = 2,MapQ=10):
             pos = line.reference_end
             source = 'C'
         else:
-            # BAM files use 0-based indexing, and we work in 1-based indexing,
-            # so we have to add one.
+            # BAM files use 0-based indexing, and we work in 1-based indexing, so we have to add one.
             pos = line.reference_start + 1
             source = 'W'
         chrom = SamAlign.getrname(line.reference_id)
         if chrom not in hit_map:
             # We store the orientations of the fragments because we only sequence one end of the transposon,
-            # so if there is a hit at a particular location, reported by both a Watson- and Crick-aligned fragment,
-            # that means that there were (at least) two insertion events, in which the transposon was "flipped".
+            # so if there is a hit at a particular location, reported by both a Watson- and Crick-aligned fragment, that means that there were (at least) two insertion events, in which the transposon was "flipped".
             hit_map[chrom] = {'W': np.zeros(ChrLen[chrom]+1, dtype=np.int),
                               'C': np.zeros(ChrLen[chrom]+1, dtype=np.int)}
         hit_map[chrom][source][pos] += 1
@@ -69,33 +96,49 @@ def FindHitsPerSample(SamAlign,ChrFeatMap, Sep0N = 2,MapQ=10):
     TotalUniqueHits = sum(len(chrom_hits) for chrom_hits in ChrHitList.values())
     total_reads = sum(hits.sum() for source in hit_map.values() for hits in source.values())
     return ChrHitList, TotalHits, TotalUniqueHits, total_reads
-
-#this class gets the position of a hit and finds its nearest ORF in the specified strand (W/C) up or down stream of that index 
+ 
 class NearestORF():
+    """Class gets the position of a hit and finds its nearest ORF in the specified strand (W/C) up or down stream of that index
+
+    Parameters
+    ----------
+        Ind : index of the ORF in the chromosome feature list
+        Dist    :   distance between the ORF position and the hit position on the chromosome
+        UpDown  : bool giving if up- or downstream ORF
+    """
+
     def __init__(self,Ind, Dist, Strand, UpDown):
-        self.Ind = Ind #the index of the ORF in the chromosome feature list
-        self.Dist = Dist #the distance between the ORF position and the hit position on the chromosome
+        self.Ind = Ind 
+        self.Dist = Dist
         self.Strand = Strand
-        self.UpDown = UpDown #is it up or down stream ORF 
-    def __gt__(self, ORF2): #greater than function
+        self.UpDown = UpDown
+
+    # Greater than function
+    def __gt__(self, ORF2):
         return self.Dist > ORF2.Dist
-    def __lt__(self, ORF2): #less than function
+
+    # Less than function
+    def __lt__(self, ORF2):
         return self.Dist < ORF2.Dist
+
     def GetFeatureName(self):
         if self.Ind >= 0:
             return ChrFeature.loc[self.Ind].FeatureName
         else:
             return 'None' #e.g. if it has no neighbor ORFS downstream - that is, the index is prior to any ORF
+
     def GetGeneName(self):
         if self.Ind >= 0:
             return ChrFeature.loc[self.Ind].GeneName
         else:
             return 'None'
+
     def GetFeatureType(self):
         if self.Ind >= 0:
             return ChrFeature.loc[self.Ind].FeatureType
         else:
             return 'None'
+
     def GetStrand(self):
         if self.Dist == 0:
             return "ORF(" + self.Strand +')'#ORF
@@ -103,18 +146,39 @@ class NearestORF():
             return " - "
         else :
             return self.Strand
-            
 
-#this procedure find the neares ORF for a position given 
-#StartI, StopI: the position on the chormosome of the merged hit; ChrFeatMap: a vector of chromosome length with feature index if exists or 0 in any chromosome position; strand: (W/C)
-def  FindNearestORFInStrand(StartI,StopI, ChrFeatMap,Strand):
-    if not isinstance(ChrFeatMap[StartI], tuple): #ORF exists at hit position (first merged hit)
-        return NearestORF(ChrFeatMap[StartI],0, Strand,'Up'), NearestORF(ChrFeatMap[StartI],0, Strand,'Down') 
-    elif not isinstance(ChrFeatMap[StopI], tuple):  #ORF exists at hit position (last merged hit)
+def  FindNearestORFInStrand(StartI, StopI, ChrFeatMap, Strand):
+    """Finds nearest open reading frame for a given position.
+
+    Parameters
+    ----------
+        StartI  :   integer
+            Start position on chromosome of the merged hit.
+        StopI   :   integer
+            Stop position on the chromosome of the merged hit.
+        ChrFeatMap  :   vector
+            Vector of chromsome length with feature index if exists, or 0 in any chromosome position
+        Strand  :   boolean
+            W (Watson) or C (Crick) strand
+
+    Returns
+    -------
+        list of lists
+            Closest ORF found on upstream (list in first element), or downstream (list in second element)
+    """
+
+    # ORF exists at hit position, first merged hit
+    if not isinstance(ChrFeatMap[StartI], tuple):
+        return NearestORF(ChrFeatMap[StartI],0, Strand,'Up'), NearestORF(ChrFeatMap[StartI],0, Strand,'Down')
+
+    # ORF exists at hit position, last merged hit
+    elif not isinstance(ChrFeatMap[StopI], tuple):
         return NearestORF(ChrFeatMap[StopI],0, Strand,'Up'), NearestORF(ChrFeatMap[StopI],0, Strand,'Down')
+
     else:
-        upi=StartI-1 #upstream is down the index (upi will hold the chromosome position of the nearest ORF
-        upF =-1      #upF will hold the feature index of the nearest ORF we found, if exists
+        # upstream is down the index
+        upi=StartI-1 # upi will hold the chromosome position of the nearest ORF
+        upF =-1      # upF will hold the feature index of the nearest ORF we found, if exists
         if not isinstance(ChrFeatMap[upi], tuple):
             upF = ChrFeatMap[upi]
         else:
@@ -124,7 +188,8 @@ def  FindNearestORFInStrand(StartI,StopI, ChrFeatMap,Strand):
                 upF = ChrFeatMap[upi]
             else:
                 upi = 1
-        #again with downstream ORFS
+
+        # same procedure with downstream ORFS
         downi=StopI+1
         DownF = -1
         if not isinstance(ChrFeatMap[downi], tuple):
@@ -136,11 +201,13 @@ def  FindNearestORFInStrand(StartI,StopI, ChrFeatMap,Strand):
                 DownF = ChrFeatMap[downi]
             else:
                 downi = len(ChrFeatMap)
-        #returns the closest ORF found up and down stream
+
+        # returns the closest ORF found up and down stream
         return NearestORF(upF,StartI - upi, Strand,'Up'), NearestORF(DownF, downi-StopI, Strand,'Down')
-    
-#this procedure takes the mapped hits and for each hit check its nearst ORF and output all the data into the hit file.
-def ListHitProp(ChrHitList, FileName,ChrFeatC, ChrFeatW):
+
+def ListHitProp(ChrHitList, FileName, ChrFeatC, ChrFeatW):
+    """Takes mapped hits and for each hit checks nearest ORF and outputs data into hit file
+    """
     Featuref = open(FileName,'w')
     Featuref.write('Chromosome\tSource\tUp feature type\tUp feature name\tUp gene name\tUp feature dist\tDown feature type\tDown feature name\tDown gene name\tDown feature dist\tIntergenicType\tHit position\tHit count\n')
     for Chr in ChrHitList.keys():
@@ -148,29 +215,20 @@ def ListHitProp(ChrHitList, FileName,ChrFeatC, ChrFeatW):
             #find out if we are in ORF, other feature or intergenic
             CORFUp,CORFDown = FindNearestORFInStrand(StartI,StopI, ChrFeatC[Chr], 'C')
             WORFUp,WORFDown = FindNearestORFInStrand(StartI,StopI, ChrFeatW[Chr], 'W')
-            #ORF,IntergenicType =  FindClosestGeneInChr(CORF,WORF)
             UpORF = CORFUp if CORFUp < WORFUp else WORFUp
             DownORF = CORFDown if CORFDown< WORFDown else WORFDown
-            #now returning a record of this type: StartI, Count, Chr, UpORF, UpDist,DownORF,DownDist, Type (WW,WC,CW,CC)
+            #now returning a record of this type: 
+            #   StartI, Count, Chr, UpORF, UpDist,DownORF,DownDist, Type (WW,WC,CW,CC)
             Featuref.write('\t'.join([Chr,source,UpORF.GetFeatureType(), UpORF.GetFeatureName(), str(UpORF.GetGeneName()), str(UpORF.Dist),\
                                       DownORF.GetFeatureType(), DownORF.GetFeatureName(), str(DownORF.GetGeneName()), str(DownORF.Dist),\
                                       (UpORF.GetStrand()+'-'+DownORF.GetStrand()),str(StartI), str(Count)])+'\n')
     Featuref.close()
-                        
-					
-					
-usage = """USAGE: MapFastq.py  
-   -i  --InDir         [str]   Input directory with .sam files to parse (deafualt is curr dir)
-   -o  --OutDir        [str]   Output directory to which the hit file will be writen (deafualt is curr dir)
-   -q  --MapQ          [int]   Map Quality - hits to parse from the sam file (default is 10)
-   -m  --MergeDist     [int]   Hits to merge with at most x nt distance between two hits (deafult is 2, that is that hit in pos 1 & 3 (3-1=2) will be united into a single hit
-   -h, --help                    print this help 
-"""
+
 
 if __name__ == '__main__':
     import argparse
     
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(usage=usage)
     
     parser.add_argument("-o", "--out-dir", default='.')
     parser.add_argument("-i", "--in-dir", default='.')
@@ -251,17 +309,30 @@ if __name__ == '__main__':
     
     # SAM is 1-based and BAM is 0-based, so we work with BAM only out of convenience.
     fNames = glob.glob(os.path.join(SamFileDir, '*.bam'))
-    #going over all sam files in a given directory and for each creating a hit file, by uniting close hits and check thier nearest ORFS
+
+    #going over all sam files in a given directory and for each creating a hit file, by uniting close hits and check their nearest ORFS
     for Name in fNames:
         BaseName = os.path.basename(Name)
-        OutFileName = os.path.join(GeneListFileDir, BaseName[:-4] + '_Hits.txt')
-        if os.path.isfile(OutFileName): #check first if the file already exists as it is very time consuming. if we want to re create the hit file, just delete or rename it
+        if BaseName.find(".sorted") == -1:
+            continue
+        else:
+            BaseName = BaseName[:-7]
+        PrefixName = BaseName[:-4]
+        OutFileName = os.path.join(GeneListFileDir, PrefixName + '_hits.txt')
+        if os.path.isfile(OutFileName): 
+        #check first if the file already exists as it is very time consuming. if we want to re create the hit file, just delete or rename it
+            print 'ERROR: Hit file for %s already exists.' % (BaseName)
             continue;
         Sami = pysam.AlignmentFile(Name, "rb")
-        print "parsing file {}".format(BaseName)
+        print "Parsing file %s..." % (BaseName)
+        
         MyList,TotalHits, TotalUniqueHits, TotalReads = FindHitsPerSample(Sami,ChrFeatW, MergeDist,MapQ) 
         ListHitProp(MyList, OutFileName, ChrFeatC, ChrFeatW) 
-        print "total hits positions (Map quality >= {}): {:,}".format(MapQ,TotalHits)
-        print "Unique hits position (minimal dist = {} bp) : {:,}".format(MergeDist,TotalUniqueHits)
-        print 'total reads found: {:,} (Map quality >= {})'.format(TotalReads,MapQ)
+        UniqueHitPercent = round(float(TotalUniqueHits)/float(TotalHits)*100, 2)
         
+        Log = '\r\n=== Finding hits ===\r\n%s reads found of map quality >= %s; in these:\r\n  %s hits were found; of these:\r\n    %s (%s%%) hit positions were found to be unique (Minimal distance = %s)\r\n' % (TotalReads, MapQ, TotalHits, TotalUniqueHits, UniqueHitPercent, MergeDist)
+        print Log
+        
+        LogFile = open('%s_log.txt' % (PrefixName), 'a')
+        LogFile.write(Log)
+        LogFile.close()

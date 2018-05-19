@@ -16,8 +16,62 @@ def _get_organism(org_name):
 
 GENES_ALL, GENES_HIGHLIGHTED, GENES_NONE = ("all", "highlighted", "none")
 
+MAINUSEAGE = '''DomainFigures.py
+    Draws genomic regions with hit locations from data file(s). Can also highlight essential domains and directions of genes.
+
+    REQUIRES:   One positional argument (region, gene, or config_file) and any relevant subarguments. 
+        Details via -h on desired argument. ('python DomainFigures.py [POSITIONAL] -h')
+ 
+    OPTIONAL:   Non-positional arguments (placed before the positional argument)
+        ('python DomainFigures.py --[NON-POSITIONAL] [POSITIONAL] --[SUBARGUMENT]')
+
+
+    NON-POSITIONAL ARGUMENTS:
+        --hits-dir          [str]   Input folder for hits file(s). Defaults to current directory.
+        --output-dir        [str]   Output folder for image(s). Defaults to current directory.
+        --domains           [str]   Which genes to draw ess domains on. 
+                                    Choose between: all, highlighted, none (Default is 'highlighted') 
+        --direction         [str]   Which genes to draw read direction for. 
+                                    Choose between: all, highlighted, none (Default is 'highlighted') 
+        --organism          [str]   Choose between: Calb, Scer, Spom (Default is 'Calb')
+        --absolute-pixel-size [int] Draws figure length relative to length of region being drawn.
+                                Use for multiple images with comparable sizes. (Default is off with all figures 250 px long)
+'''
+
+REGIONUSAGE = '''Domainfigures.py region
+    Define drawn area via chromosomal coordinates.
+
+    REQUIRES (all three):
+        --chromosome    [str]   Which chromosome to draw. For Calb choose: number '1' through '7' or 'R'
+                                (Uses SC5314 assembly 22, haplotype A)
+        --start         [int]   bp position from which to start figure.
+        --stop          [int]   bp position from which to stop figure.
+
+    OPTIONAL:
+        --genes     Choose gene(s) to highlight (for domains, direction arguments). Use standard name(s), 
+                    or '*' for all genes. ('*' equivalent to 'all' for domains, direction arguments)
+'''
+
+GENEUSAGE = '''Domainfigures.py gene
+    Define drawn area via gene name(s).
+
+    REQUIRES:
+        --genes     Choose gene(s) to draw and highlight. Use standard name(s), or '*' for all genes.
+
+    PLUS ONE OF:    Defines flanking region to draw around drawn gene(s).
+        --percent-of-length     [float]     Percent of each gene's length. Default is 0.2 (20 percent)
+        --bps                   [int]       Basepairs before and after gene(s). Default is 20000.
+'''
+
+CONFIGUSAGE = '''Domainfigures.py config_file
+    Talk to Yael and Vladimir.
+'''
+
 def main():
-    parser = argparse.ArgumentParser()
+    ''' Sets arguments and subarguments for running the program, and reads in files for organism specified.
+        If config_file being used, reads that in too.
+    '''
+    parser = argparse.ArgumentParser(usage=MAINUSEAGE)
     
     parser.add_argument("--hits-folder", default=".")
     parser.add_argument("--output-folder", default=".")
@@ -31,13 +85,13 @@ def main():
     
     subparsers = parser.add_subparsers(dest="source_type")
     
-    region_parser = subparsers.add_parser("region")
+    region_parser = subparsers.add_parser("region", usage=REGIONUSAGE)
     region_parser.add_argument("--chromosome", required=True)
     region_parser.add_argument("--start", type=int, required=True)
     region_parser.add_argument("--stop", type=int, required=True)
     region_parser.add_argument("--genes", type=gene_list_parser, default="")
     
-    gene_parser = subparsers.add_parser("gene")
+    gene_parser = subparsers.add_parser("gene", usage=GENEUSAGE)
     gene_name = gene_parser.add_mutually_exclusive_group(required=True)
     # TODO: can we make --genes not be named, and instead come at the end of the parser?
     gene_name.add_argument("--genes", type=gene_list_parser)
@@ -46,7 +100,7 @@ def main():
     gene_region.add_argument("--bps", type=int)
     gene_parser.add_argument("--exclude-genes", type=gene_list_parser, default="")
     
-    config_file_parser = subparsers.add_parser("config_file")
+    config_file_parser = subparsers.add_parser("config_file", usage=CONFIGUSAGE)
     config_file_parser.add_argument("config_file")
     
     args = parser.parse_args()
@@ -80,6 +134,8 @@ def main():
     # TODO: we manipulate the chromosome names to reflect the standard names,
     # but this should be done in the hit-reading functions.
     chrom_names = db._chrom_names # TODO: don't do this, _chrom_names are protected!
+    print chrom_names
+    import sys; sys.exit()
     for hit_track in hits:
         new_hit_track = {chrom.name: SortedCollection(key=lambda h: h["hit_pos"]) for chrom in db}
         for hit in hit_track:
@@ -104,6 +160,8 @@ def main():
         handle_args(args, hits)
     
 def handle_args(args, hits):
+    '''Takes input arguments and data from hit file(s). Passes into correct drawing module.
+    '''
     organism = _get_organism(args.organism) 
     db = organism.feature_db
     
@@ -204,11 +262,31 @@ def draw_gene(organism,
               label,
               hits,
               draw_domains,
-              draw_direcions,
+              draw_directions,
               out_file_prefix,
               out_dir,
               absolute_pixel_size=None,
               rna_bam=None):     
+    '''Takes drawing settings from handle_args module for gene source type, and draws figure.
+
+    Parameters
+    ----------
+        organism    :       organism genome is of
+        gene    :           feature being drawn
+        gene_pad    :       amount of flanking region (defined by either percent of length, or bps)
+        label   :           feature name and length (to label figure)
+        hits    :           hit data for feature
+        draw_domains    :   domain argument
+        draw_directions :   direction argument
+        out_file_prefix :   '-[feature length]'
+        out_dir :           output directory
+        absolute-pixel-size: absolute-pixel-size argument
+
+    Writes
+    ------
+        Gene figure(s) to png image file(s) via draw_genomic_region
+    '''
+   
     region_start = max(floor(gene.start - gene_pad), 0)
     region_end = min(ceil(gene.stop + gene_pad), len(organism.feature_db[gene.chromosome]))
 
@@ -220,7 +298,7 @@ def draw_gene(organism,
         gene.chromosome, region_start, region_end,
         hits,
         draw_domains,
-        draw_direcions,
+        draw_directions,
         os.path.join(out_dir, name),
         highlighted_genes=set([gene.standard_name]),
         exclude_genes=excluded_genes,
@@ -244,6 +322,26 @@ def draw_genomic_region(
         absolute_pixel_size=0,
         rna_bam=None
     ):
+    '''Takes drawing settings from handle_args module for region or draw_gene, and draws figure.
+
+    Parameters
+    ----------
+        organism    :       organism genome is of
+        chromosome  :       chromosome for feature being drawn
+        region_start:       bp position to start drawing figure on chromosome
+        region_end  :       bp position to end drawing figure on chromosome
+        hits    :           hit data for feature
+        draw_domains    :   domain argument
+        draw_directions :   direction argument
+        out_file    :       output directory
+        highlighted_genes:  set of genes to highlight in drawing
+        label   :           label for figure
+        absolute-pixel-size: absolute-pixel-size argument
+
+    Writes
+    ------
+        Figure(s) to png image file(s)
+    '''
     
     # TODO: there's an open issue of what to do when the label isn't provided.
     # Consider all usages and do it right.
@@ -438,21 +536,4 @@ def draw_genomic_region(
 
 
 if __name__ == "__main__":
-    # The raw_input() at the end is useful when this is run within a batch file
-    # in Windows, so that we can see the output before it disappears.
-#     try:
         main()
-#     except Exception:
-#         import traceback
-#         print traceback.format_exc()
-#         raw_input("An error occurred! Please tell Vlad.")
-#     else:
-#         raw_input("Finished! Press Enter to close the window.")
-
-
-
-# Running arguments:
-# --hits-folder "/Users/bermanlab/ngs-bench/tn drawings/hits" --output "/tmp" --organism Calb --absolute-pixel-size 10 --domains all --direction all gene --bps 2000  --alb ADE2,ERG11
-# --hits-folder ~/ngs-bench/tn\ drawings/scer\ hits/ --output-folder ~/ngs-bench/tn\ drawings/scer\ figs/ --organism Scer --absolute-pixel-size 10 gene --alb "*" --bps 2000
-# --hits-folder "/Users/bermanlab/ngs-bench/tn drawings/hits" --output "/tmp" --organism Calb --absolute-pixel-size 10 --domains all --direction all region --chromosome R --start 254000 --stop 263000
-# --hits-folder "/Users/bermanlab/ngs-bench/tn drawings/scer hits/" --output-folder "/Users/bermanlab/ngs-bench/tn drawings/scer figs/" --organism Scer --absolute-pixel-size 10 gene --alb * --bps 2000
