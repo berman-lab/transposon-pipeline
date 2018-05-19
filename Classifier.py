@@ -119,7 +119,11 @@ def draw_venn(title, output_file_path, data, labels):
         venn = venn2
     else:
         venn = venn3
-    venn(data, labels)
+    v = venn(data, labels)
+    
+    for l in v.set_labels:
+        l.set_style('italic')
+    
     plt.title(title)
     plt.savefig(output_file_path,
                 transparent=True,
@@ -512,7 +516,7 @@ def main():
 
     # Read albicans hit data:
     rdf = 1 # Read depth filter used
-    alb_hit_file_folder = Shared.get_dependency("albicans/experiment data/post evo/q20m2")
+    alb_hit_file_folder = Shared.get_dependency("albicans", "experiment data", "post evo", "q20m2")
     post_hits = SummaryTable.read_hit_files(glob.glob(os.path.join(alb_hit_file_folder, '*03*')) +
                                             glob.glob(os.path.join(alb_hit_file_folder, '*07*')) +
                                             glob.glob(os.path.join(alb_hit_file_folder, '*11*')),
@@ -668,8 +672,8 @@ def main():
             training_calb_manually_curated_ess,
             training_calb_manually_curated_non_ess,
             OrderedDict((
-                ("Calb", (copy_calb_class_dataset(),)),
-                ("Calb", (calb_ortholog_class_dataset,)),
+                ("Calb-all", (copy_calb_class_dataset(),)),
+                ("Calb-ortholog-only", (calb_ortholog_class_dataset,)),
             )),
             OrderedDict((
                 ("Scer-com", (
@@ -955,7 +959,7 @@ def main():
     
     # We do want to left-join Calb and the other 
     
-    orth_cols_config = ORTH_COLS_CONFIG;
+    orth_cols_config = ORTH_COLS_CONFIG
     
     def get_roc_curve_from_data(data, name):
         training_ess = data[name][0]
