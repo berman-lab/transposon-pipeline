@@ -120,8 +120,6 @@ def get_hits_from_wig(wig_file):
     Used in reading Kornmann's cerevisiae hit data.
     """
     
-    cer_db = GenomicFeatures.default_cer_db()
-    
     result = []
     with open(wig_file, 'r') as in_file:
         in_file.readline() # Drop the header line
@@ -137,16 +135,8 @@ def get_hits_from_wig(wig_file):
             hit_pos = int(hit_pos)
             reads = int(reads)
             
-            fs = cer_db[chrom_name][hit_pos]
-            if len(fs) == 0:
-                name = ig_type = "nan"
-            else:
-                f = fs[0]
-                name = f.standard_name
-                ig_type = "ORF" # TODO: how do we know it's an ORF? Do we need this?
-            
-            result.append({"chrom": chrom_name, "hit_pos": hit_pos, "gene_name": name,
-                           "ig_type": ig_type,
+            result.append({"chrom": chrom_name,
+                           "hit_pos": hit_pos,
                            "hit_count": reads})
             
     return result
@@ -635,7 +625,7 @@ def write_data_to_data_frame(data, cols_config):
         first_record = data[0]
         for col in cols_config:
             if col[field_col] not in first_record:
-                print "WARNING: %s not in records to print!" % col[field_col]
+#                 print "WARNING: %s not in records to print!" % col[field_col]
                 continue
             filtered_cols_config.append(col)
         cols_config = filtered_cols_config
@@ -868,6 +858,8 @@ def enrich_alb_records(records):
         record["deleted_in_calb"] = ",".join(filter(None, [record["homann_deletions"] and "Homann", record["noble_deletions"] and "Noble", record["sanglard_deletions"] and "Sanglard"]))
         
         record["essential_in_mitchell"] = "Yes" if std_name in mitchell_essentials else ""
+        
+        record["has_paralog"] = "Yes" if std_name in Organisms.alb.genes_with_paralogs else ""
 
 @Shared.memoized
 def get_homann_deletions():
@@ -1101,14 +1093,14 @@ def draw_histogram(histogram, sample_name, file_name, bins, ylim=300):
      
     plt.close()
     
-def draw_chrom_map(data, bin_size, title, y_max, outfile):
+def draw_chrom_map(data, bin_size, title, y_max, outlier_fold_threshold, outfile):
     alb_db = GenomicFeatures.default_alb_db()
     
     chroms = list(alb_db)
     chroms.sort(key=lambda c: c.name)
     max_chrom_len = max(len(c) for c in chroms)
     
-    fig = plt.figure(figsize=(30, 4*len(chroms)))
+    fig = plt.figure(figsize=(15, 2*len(chroms))) # Figsize is inches!
     plt.gcf().suptitle(title, fontsize=22, fontweight='bold', y=0.92, x=0.2)
     
     ade2 = alb_db.get_feature_by_name("ADE2")
@@ -1121,10 +1113,12 @@ def draw_chrom_map(data, bin_size, title, y_max, outfile):
             row_num += 1
     
     # Start drawing each chromosome:
+    patch_objects = {}
     base_row = 0
     for chrom in sorted(chroms, key=lambda c: int(c.name[7]) if c.name[7] != "R" else 0):
         chrom_display_name = chrom.name[4].capitalize() + chrom.name[5:8]
         chrom_data = data[chrom.name]
+        chrom_median = np.median(chrom_data)
         
         if max(chrom_data) <= y_max:
             # The data in the chromosome does not exceed the y maximum, draw
@@ -1178,7 +1172,10 @@ def draw_chrom_map(data, bin_size, title, y_max, outfile):
             ax.plot((1 - d, 1 + d), (1 - d, 1 + d), **kwargs)  # bottom-right diagonal
         
         # Adding the last position as 0/1 so the plot won't be shorter:    
-        ax.bar(range(len(chrom_data)), chrom_data)
+        barlist = ax.bar(range(len(chrom_data)), chrom_data)
+        for (b_ix, b) in enumerate(barlist):
+            if chrom_data[b_ix] > (chrom_median+outlier_fold_threshold):
+                b.set_color('r')
         ax.set_ylabel(chrom_display_name, fontsize = 20, fontweight = 'bold')
         ax.set_xlim([0, len(chrom_data)])
         ax.tick_params(axis='both', which='major', labelsize=14)
@@ -1189,26 +1186,31 @@ def draw_chrom_map(data, bin_size, title, y_max, outfile):
             "long_terminal_repeat": "cyan",
             "tRNA|Verified": "orange",
             "tRNA|Uncharacterized": "orange",
-            "retrotransposon": "black"
+            "retrotransposon": "black",
+            "rRNA|Verified": "navy"
         }
         for feature in chrom.get_features():
             if feature.type not in patches:
                 continue
-            ax.add_patch(Rectangle((float(feature.start)/bin_size, 0),
+            p = ax.add_patch(Rectangle((float(feature.start)/bin_size, 0),
                                    width=float(len(feature))/bin_size,
                                    height=-y_max/10.0,
                                    fc=patches[feature.type],
                                    ec=patches[feature.type],
                                    clip_on=False))
+            if feature.type not in patch_objects:
+                patch_objects[feature.type] = p
             
         if chrom.name == ade2.chromosome:
-            ax.add_patch(Rectangle((ade2.start/bin_size, 0),
+            ade_patch = ax.add_patch(Rectangle((ade2.start/bin_size, 0),
                                    width=1,
                                    height=-y_max/10.0,
                                    fc="purple",
                                    ec="purple",
                                    clip_on=False))
-            
+    
+    fig.legend([ade_patch] + patch_objects.values(), ['ADE2'] + patch_objects.keys(), loc='lower right', fontsize='xx-large')
+    
     plt.savefig(outfile)
     plt.close()
 
@@ -1286,7 +1288,7 @@ if __name__ == "__main__":
     
     alb_db = GenomicFeatures.default_alb_db()
     
-    input_file_paths = glob.glob(os.path.join(input_dir, "*_Hits.txt"))
+    input_file_paths = sorted(glob.glob(os.path.join(input_dir, "*_Hits.txt")))
     input_filenames = [os.path.split(file_path)[-1][:-9] for file_path in input_file_paths]
     
     all_hits = read_hit_files(input_file_paths, read_depth_filter)
@@ -1322,11 +1324,11 @@ if __name__ == "__main__":
     # Write nominal hit-per-ORF table (one table for all datasets):
     with open(os.path.join(output_dir, "hit_summary.RDF_%d.csv" % read_depth_filter), 'w') as out_file:
         writer = csv.writer(out_file)
-        writer.writerow(["Standard name", "Common name"] + [f[-2:] for f in input_filenames])
+        writer.writerow(["Standard name", "Common name", "Type"] + ["Lib %s" % f[-2:] for f in input_filenames])
         for record_row in zip(*[ds.values() for ds in all_analyzed]):
             assert len(set(r["feature"].standard_name for r in record_row)) == 1
             feature = record_row[0]["feature"]
-            writer.writerow([feature.standard_name, feature.common_name] +
+            writer.writerow([feature.standard_name, feature.common_name, feature.type] +
                             [r["hits"] for r in record_row])
     
     # Write a table of reads-per-hit for each dataset:
@@ -1366,22 +1368,15 @@ if __name__ == "__main__":
     # Plot the hit and read chromosomal maps:
     bin_size = 10000
     for fname, hits in zip(input_filenames, all_hits):
-        hit_map = make_hit_map(hits, bin_size)
-        read_map = make_read_map(hits, bin_size)
         # NB: using a different log base doesn't affect the final figure much,
         # as the relationships between the values stay the same no matter what
         # base is used. Only the axis labels change.
         log_read_map = transform_chrom_map_with_log(make_read_map(hits, bin_size), 10)
-           
-        all_hits_sorted = sorted(sum(hit_map.values(), []))
-        max_hits = int( round(max(all_hits_sorted), -2) + 100 )
-        bottom_cut = int( round(all_hits_sorted[int(len(all_hits_sorted) * 0.5)], -2) + 100 )
-        bottom_cut = min(map(max, hit_map.values())) / 100 * 100 + 100
-        draw_chrom_map(hit_map, bin_size, "Hits/10000 bps", bottom_cut, os.path.join(output_dir, "hit_map.%s.png" % fname))
-          
-        draw_chrom_map(log_read_map, bin_size, "Log10 reads/10000 bps", 7, os.path.join(output_dir, "log10_read_map.%s.png" % fname))
-        draw_chrom_map(read_map, bin_size, "Reads/10000 bps", 100000, os.path.join(output_dir, "read_map.%s.png" % fname))
-    
+        log_hit_map = transform_chrom_map_with_log(make_hit_map(hits, bin_size), 10)
+        
+        draw_chrom_map(log_read_map, bin_size, "Log10 reads/10000 bps", 7, math.log(10, 10), os.path.join(output_dir, "log10_read_map.%s.png" % fname))
+        draw_chrom_map(log_hit_map, bin_size, "Log10 hits/10000 bps", 4, math.log(5, 10), os.path.join(output_dir, "log10_hit_map.%s.png" % fname))
+     
     # More correlations than you can shake a stick at:
     perform_pairwise_correlations(input_filenames,
                                   [a.values() for a in all_analyzed],
