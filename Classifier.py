@@ -491,7 +491,25 @@ def write_ortholog_excel(orth_df, calb_fprs_df, scer_fprs_df, spom_fprs_df, outp
 
     
 def main():
-    output_folder = os.path.join(Shared.get_script_dir(), "output", "predictions - upstream calculations")
+    # List of folders used for source data:
+    # TODO: this should be generalized eventually and refactored with argparse,
+    # but currently too much stuff is hardcoded, and in any case no major
+    # changes are to be done for the paper at this point. 
+    output_folder = os.path.join(Shared.get_script_dir(), "output", "predictions")
+    alb_hit_file_folder = Shared.get_dependency("albicans", "experiment data", "post evo", "q20m2")
+    all_cer_track_files = glob.glob(Shared.get_dependency("Kornmann", "*WildType*.wig"))
+    pombe_hit_file = Shared.get_dependency("pombe", "hermes_hits.csv")
+    
+    # TODO: should not be hard-coded. Consider using DomainFigures to create the figures
+    # as needed, instead of copying them from somewhere else.
+    calb_source_figure_folder = "/Users/bermanlab/OneDrive2/OneDrive/Tn Paper/All gene figures/Calb"
+    calb_source_figure_list = os.listdir(calb_source_figure_folder)
+    
+    scer_source_figure_folder = "/Users/bermanlab/OneDrive2/OneDrive/Tn Paper/All gene figures/Scer"
+    scer_source_figure_list = os.listdir(scer_source_figure_folder)
+    
+    spom_source_figure_folder = "/Users/bermanlab/OneDrive2/OneDrive/Tn Paper/All gene figures/Spom"
+    spom_source_figure_list = os.listdir(spom_source_figure_folder)
     
     # Set up needed infrastructure
     # The feature DBs:
@@ -500,7 +518,6 @@ def main():
     pom_db = Organisms.pom.feature_db
     
     # Read cerevisiae hit data:
-    all_cer_track_files = glob.glob(os.path.join(Shared.get_script_dir(), "dependencies", "Kornmann", "*WildType*.wig"))    
     all_cer_tracks = [SummaryTable.get_hits_from_wig(fname) for fname in all_cer_track_files]
     cer_wt_combined = sum(all_cer_tracks, [])
     
@@ -516,7 +533,6 @@ def main():
 
     # Read albicans hit data:
     rdf = 1 # Read depth filter used
-    alb_hit_file_folder = Shared.get_dependency("albicans", "experiment data", "post evo", "q20m2")
     post_hits = SummaryTable.read_hit_files(glob.glob(os.path.join(alb_hit_file_folder, '*03*')) +
                                             glob.glob(os.path.join(alb_hit_file_folder, '*07*')) +
                                             glob.glob(os.path.join(alb_hit_file_folder, '*11*')),
@@ -557,7 +573,7 @@ def main():
         record["ground_truth"] = "Yes" if rec_name in alb_lit_ess else "No" if rec_name in alb_lit_non_ess else ""
     
     # Read the pombe hit data:
-    pom_hits = SummaryTable.read_pombe_hit_file(Shared.get_dependency("pombe", "hermes_hits.csv"), rdf)
+    pom_hits = SummaryTable.read_pombe_hit_file(pombe_hit_file, rdf)
     ignored_pom_genes = Organisms.pom.ignored_features
     pom_records = SummaryTable.analyze_hits(pom_hits, pom_db)
     pom_records = {n: f for n, f in pom_records.items() if n not in ignored_pom_genes}
@@ -726,10 +742,6 @@ def main():
                     copy_scer_com_bench_ess(),
                     copy_scer_com_bench_non_ess(),
                 )),
-#                 ("Omeara", (
-#                     copy_omeara_bench_ess(),
-#                     copy_omeara_bench_non_ess(),
-#                 )),
                 ("Spom", (
                     copy_spom_bench_ess(),
                     copy_spom_bench_non_ess(),
@@ -742,19 +754,7 @@ def main():
         )),
     ))
 
-#     output_folder = os.path.join(Shared.get_script_dir(), "output", "predictions - fixed homann")    
     run_pipeline(classifier_factory, feature_groups, data, cols_config, cols_config, output_folder, 0.1)
-    
-    # TODO: should not be hard-coded. Consider using DomainFigures to create the figures
-    # as needed, instead of copying them from somewhere else.
-    calb_source_figure_folder = "/Users/bermanlab/OneDrive2/OneDrive/Tn Paper/All gene figures/Calb"
-    calb_source_figure_list = os.listdir(calb_source_figure_folder)
-    
-    scer_source_figure_folder = "/Users/bermanlab/OneDrive2/OneDrive/Tn Paper/All gene figures/Scer"
-    scer_source_figure_list = os.listdir(scer_source_figure_folder)
-    
-    spom_source_figure_folder = "/Users/bermanlab/OneDrive2/OneDrive/Tn Paper/All gene figures/Spom"
-    spom_source_figure_list = os.listdir(spom_source_figure_folder)
     
     # TODO: what does this do? Add a comment.
 
