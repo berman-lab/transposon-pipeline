@@ -9,6 +9,7 @@ from SortedCollection import SortedCollection
 from RangeSet import RangeSet
 import Organisms
 from Organisms import get_orths_by_name
+import pysam
 
 def _get_organism(org_name):
     return {"Calb": Organisms.alb, "Scer": Organisms.cer, "Spom": Organisms.pom}[org_name]
@@ -24,6 +25,7 @@ def main():
     parser.add_argument("--direction", default="highlighted", choices=[GENES_ALL, GENES_HIGHLIGHTED, GENES_NONE])
     parser.add_argument("--organism", default="Calb", choices=["Calb", "Scer", "Spom"])
     parser.add_argument("--absolute-pixel-size", type=int, default=0)
+    parser.add_argument("--rna-bam")
     
     gene_list_parser = lambda gs: [g for g in gs.split(',')]
     
@@ -165,7 +167,18 @@ def handle_args(args, hits):
                 
             excluded_genes = [f.standard_name for f in map(db.get_feature_by_name, args.exclude_genes) if f]
             
-            draw_gene(organism, feature, excluded_genes, gene_pad, label, hits, args.domains, args.direction, name, args.output_folder, args.absolute_pixel_size)
+            draw_gene(organism,
+                      feature,
+                      excluded_genes,
+                      gene_pad,
+                      label,
+                      hits,
+                      args.domains,
+                      args.direction,
+                      name,
+                      args.output_folder,
+                      args.absolute_pixel_size,
+                      args.rna_bam)
     else: # "region"
         chromosome = args.chromosome
         start = args.start
@@ -180,7 +193,8 @@ def handle_args(args, hits):
             args.direction,
             os.path.join(args.output_folder, name),
             highlighted_genes=set(args.genes),
-            absolute_pixel_size=args.absolute_pixel_size
+            absolute_pixel_size=args.absolute_pixel_size,
+            rna_bam=args.rna_bam
         )
     
 def draw_gene(organism,
@@ -193,7 +207,8 @@ def draw_gene(organism,
               draw_direcions,
               out_file_prefix,
               out_dir,
-              absolute_pixel_size=None):     
+              absolute_pixel_size=None,
+              rna_bam=None):     
     region_start = max(floor(gene.start - gene_pad), 0)
     region_end = min(ceil(gene.stop + gene_pad), len(organism.feature_db[gene.chromosome]))
 
@@ -210,7 +225,8 @@ def draw_gene(organism,
         highlighted_genes=set([gene.standard_name]),
         exclude_genes=excluded_genes,
         label=label,
-        absolute_pixel_size=absolute_pixel_size
+        absolute_pixel_size=absolute_pixel_size,
+        rna_bam=rna_bam
     )
 
 def draw_genomic_region(
@@ -226,6 +242,7 @@ def draw_genomic_region(
         exclude_genes=frozenset(),
         label=None,
         absolute_pixel_size=0,
+        rna_bam=None
     ):
     
     # TODO: there's an open issue of what to do when the label isn't provided.
@@ -238,10 +255,12 @@ def draw_genomic_region(
     track_height = 5
     feature_height = 20
 #     label_height = 20 if label else 0
+    rna_track_height = 20
     label_height = 20
     
     width = 350 if absolute_pixel_size <= 0 else int(region_len / absolute_pixel_size)
-    height = track_height * len(hits) + feature_height + label_height + track_height * 2
+    height = track_height * len(hits) + feature_height + label_height + track_height * 2 + \
+        (rna_track_height if rna_bam else 0)
     
     surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
     ctx = cairo.Context(surface)
@@ -284,7 +303,8 @@ def draw_genomic_region(
     # Draw the feature:
     features_in_range = organism.feature_db.get_features_at_range(chromosome, (region_start, region_end))
     
-    feature_track_y = float(height - feature_height - label_height - track_height*2) / height
+    feature_track_y = float(height - feature_height - label_height - track_height*2 -
+                            (rna_track_height if rna_bam else 0)) / height
     feature_track_height_scaled = float(feature_height) / height
     scale_bp = lambda bp: min(1.0, max(0.0, float(bp - region_start)) / region_len) 
     for feature in features_in_range:
@@ -375,6 +395,34 @@ def draw_genomic_region(
         ctx.rectangle(ignored_start, ignored_track_y, ignored_stop - ignored_start, track_height_scaled)
         ctx.set_source_rgb(1, 0, 0)
         ctx.fill()
+        
+    # Add RNA if Calbicans:
+    if rna_bam:
+        rna_seq = pysam.AlignmentFile(rna_bam, "rb")
+        aligned_reads = [0] * int(region_end - region_start)
+        for aligned_read in rna_seq.fetch(chromosome, region_start, region_end):
+            for p in aligned_read.get_reference_positions():
+                target_ix = int(p - region_start)
+                if not (0 <= target_ix < len(aligned_reads)):
+                    continue
+                aligned_reads[target_ix] += 1
+        
+        max_aligned = float(max(aligned_reads))
+        
+        rna_track_y = ignored_track_y + track_height_scaled
+        rna_track_height_scaled = float(rna_track_height) / height
+        
+        for ix, nreads in enumerate(aligned_reads):
+            ref_pos = ix + int(region_start)
+            ctx.rectangle(
+                scale_bp(ref_pos),
+                rna_track_y + (rna_track_height_scaled - rna_track_height_scaled * (nreads / max_aligned)),
+                scale_bp(ref_pos+1) - scale_bp(ref_pos),
+                rna_track_height_scaled * (nreads / max_aligned)
+            )
+            ctx.set_source_rgb(0, 0, 0)
+            ctx.fill()
+        
     
     # Draw the text:
     if label:
